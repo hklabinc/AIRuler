@@ -10,7 +10,7 @@
         android:id="@+id/txtTitle"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="모델을 선택해주세요.(v.26.0226.1)"
+        android:text="모델을 선택해주세요.(v.26.0226)"
         android:textColor="@android:color/black"
         android:textSize="18sp"
         android:gravity="center"
