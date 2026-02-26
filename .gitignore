@@ -1,17 +1,31 @@
-*.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+# Gradle
+.gradle/
+**/build/
+
+# Local config
 local.properties
-/release
-.apk
+
+# Android Studio
+*.iml
+.idea/
+.DS_Store
+
+# Native
+.externalNativeBuild/
+.cxx/
+
+# Generated
+captures/
+
+# Release outputs
+**/release/
+*.apk
+*.aab
+
+# Models (YOLO etc)
+*.pt
+*.onnx
+*.weights
+
+# Zips
+*.zip
