@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:foreground="?attr/selectableItemBackground"
+    android:padding="6dp">
+
+    <ImageView
+        android:id="@+id/imgIcon"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:scaleType="centerCrop"
+        android:background="@drawable/bg_image_round"
+        android:clipToOutline="true"
+        android:outlineProvider="background"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintDimensionRatio="1:1"/>
+
+    <!-- (선택) 모델명 표시 -->
+    <TextView
+        android:id="@+id/txtName"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:padding="4dp"
+        android:textSize="10sp"
+        android:textColor="@android:color/white"
+        android:background="@drawable/bg_text_label_round"
+        android:clipToOutline="true"
+        android:outlineProvider="background"
+        android:gravity="center"
+        android:maxLines="1"
+        android:ellipsize="end"
+        app:layout_constraintStart_toStartOf="@id/imgIcon"
+        app:layout_constraintEnd_toEndOf="@id/imgIcon"
+        app:layout_constraintBottom_toBottomOf="@id/imgIcon"/>
+
+    <!-- 롱프레스시 버튼 배경 -->
+    <View
+        android:id="@+id/actionShade"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="#80000000"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="@id/imgIcon"
+        app:layout_constraintBottom_toBottomOf="@id/imgIcon"
+        app:layout_constraintStart_toStartOf="@id/imgIcon"
+        app:layout_constraintEnd_toEndOf="@id/imgIcon"/>
+
+    <LinearLayout
+        android:id="@+id/actionPanel"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:measureWithLargestChild="true"
+        android:gravity="center"
+        android:visibility="gone"
+        app:layout_constraintStart_toStartOf="@id/imgIcon"
+        app:layout_constraintEnd_toEndOf="@id/imgIcon"
+        app:layout_constraintTop_toTopOf="@id/imgIcon"
+        app:layout_constraintBottom_toBottomOf="@id/imgIcon">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnStatus"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Status"
+            android:textAllCaps="false"
+            android:layout_margin="0dp"
+            android:minHeight="26dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:paddingStart="2dp"
+            android:paddingEnd="2dp"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:autoSizeTextType="uniform"
+            android:autoSizeMinTextSize="3sp"
+            android:autoSizeMaxTextSize="10sp"
+            android:autoSizeStepGranularity="1sp"
+            android:textSize="10sp"
+            android:textColor="@android:color/white"
+            app:backgroundTint="#66000000"
+            app:strokeColor="@android:color/white"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnDownload"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Download"
+            android:layout_margin="0dp"
+            android:minHeight="26dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:textSize="10sp"
+            android:textColor="@android:color/white"
+            app:backgroundTint="#66000000"
+            app:strokeColor="@android:color/white"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnDelete"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Delete"
+            android:layout_margin="0dp"
+            android:minHeight="26dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:textSize="10sp"
+            android:textColor="@android:color/white"
+            app:backgroundTint="#66000000"
+            app:strokeColor="@android:color/white"/>
+    </LinearLayout>
+
+    <!-- 다운로드 진행 표시 -->
+    <LinearLayout
+        android:id="@+id/progressPanel"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:background="#80000000"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="@id/imgIcon"
+        app:layout_constraintBottom_toBottomOf="@id/imgIcon"
+        app:layout_constraintStart_toStartOf="@id/imgIcon"
+        app:layout_constraintEnd_toEndOf="@id/imgIcon">
+
+        <ProgressBar
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+
+        <TextView
+            android:id="@+id/txtProgress"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="0%"
+            android:textColor="@android:color/white"
+            android:textSize="12sp"
+            android:paddingTop="6dp"/>
+    </LinearLayout>
+
+</androidx.constraintlayout.widget.ConstraintLayout>

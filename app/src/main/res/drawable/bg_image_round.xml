@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+
+    <!-- 이미지 자체를 자르기 위한 마스크용 -->
+    <solid android:color="@android:color/transparent" />
+
+    <!-- ✅ 이미지 모서리 둥글게 -->
+    <corners android:radius="6dp" />
+</shape>

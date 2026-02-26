@@ -1,0 +1,478 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/rootLayout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@android:color/white">
+
+    <!-- (기존 topBar는 화면에서 제거) : ID 유지가 필요하면 GONE으로 남겨둠 -->
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:visibility="gone" />
+
+    <!-- 중앙 영역 : 서(왼쪽 버튼+←), 센터(16:9 Preview/Overlay), 동(오른쪽 버튼+→) -->
+    <LinearLayout
+        android:id="@+id/centerRow"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:background="@android:color/white">
+
+        <!-- 서쪽 : Left Buttons + Left Arrow -->
+        <FrameLayout
+            android:id="@+id/leftPanel"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1.4"
+            android:background="@android:color/white">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical">
+
+                <!-- 왼쪽 3개 버튼(아이콘) : Home / Setting / Download(REF 저장) -->
+                <LinearLayout
+                    android:id="@+id/leftButtonBar"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:padding="2dp"
+                    android:gravity="center">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnHome"
+                        android:layout_width="0dp"
+                        android:layout_height="30dp"
+                        android:layout_weight="1"
+                        android:layout_margin="2dp"
+                        android:minWidth="0dp"
+                        android:minHeight="0dp"
+                        android:insetLeft="0dp"
+                        android:insetRight="0dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:padding="0dp"
+                        android:text=""
+                        android:contentDescription="Home"
+                        android:tooltipText="Home"
+                        android:backgroundTint="#D9B6FF"
+                        app:strokeColor="#707070"
+                        app:strokeWidth="0.5dp"
+                        app:icon="@drawable/home"
+                        app:iconTint="@null"
+                        app:iconSize="28dp"
+                        app:iconPadding="0dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnSettings"
+                        android:layout_width="0dp"
+                        android:layout_height="30dp"
+                        android:layout_weight="1"
+                        android:layout_margin="2dp"
+                        android:minWidth="0dp"
+                        android:minHeight="0dp"
+                        android:insetLeft="0dp"
+                        android:insetRight="0dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:padding="0dp"
+                        android:text=""
+                        android:contentDescription="Setting"
+                        android:tooltipText="짧게: 설정\n길게: 모델 업데이트"
+                        android:backgroundTint="#E5E5E5"
+                        app:strokeColor="#707070"
+                        app:strokeWidth="0.5dp"
+                        app:icon="@drawable/setting"
+                        app:iconTint="@null"
+                        app:iconSize="28dp"
+                        app:iconPadding="0dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnRetry"
+                        android:layout_width="0dp"
+                        android:layout_height="30dp"
+                        android:layout_weight="1"
+                        android:layout_margin="2dp"
+                        android:minWidth="0dp"
+                        android:minHeight="0dp"
+                        android:insetLeft="0dp"
+                        android:insetRight="0dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:padding="0dp"
+                        android:text=""
+                        android:contentDescription="Retry"
+                        android:tooltipText="짧게: 50MP 재측정\n길게: 200MP 재측정"
+                        android:backgroundTint="#E5E5E5"
+                        app:strokeColor="#707070"
+                        app:strokeWidth="0.5dp"
+                        app:icon="@drawable/retry"
+                        app:iconTint="@null"
+                        app:iconSize="28dp"
+                        app:iconPadding="0dp" />
+                </LinearLayout>
+
+                <!-- 왼쪽 화살표 영역 -->
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:background="@android:color/white">
+
+                    <ImageView
+                        android:id="@+id/imgLeftArrow"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"
+                        android:scaleType="centerInside"
+                        android:src="@drawable/left_arrow"
+                        android:visibility="gone"/>
+                </FrameLayout>
+
+            </LinearLayout>
+        </FrameLayout>
+
+        <!-- 센터 : 16:9 비율 Preview 컨테이너 -->
+        <androidx.constraintlayout.widget.ConstraintLayout
+            android:id="@+id/previewOuter"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="8"
+            android:background="@android:color/white">
+
+            <!-- 16:9 비율 유지(Preview + 모든 Overlay는 이 컨테이너 크기를 그대로 따라감) -->
+            <FrameLayout
+                android:id="@+id/previewContainer"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintDimensionRatio="16:9">
+
+                <androidx.camera.view.PreviewView
+                    android:id="@+id/previewView"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    app:implementationMode="performance" />
+
+                <com.hklab.airuler.view.DetectionOverlayView
+                    android:id="@+id/detectionOverlay"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent" />
+
+                <!-- ✅ 정지 화면 오버레이: Preview Pause / ALERT 시 마지막 프레임을 표시 -->
+                <ImageView
+                    android:id="@+id/freezeImageView"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scaleType="fitXY"
+                    android:visibility="gone"
+                    android:clickable="false"
+                    android:focusable="false" />
+
+
+                <ImageView
+                    android:id="@+id/overlayImageView"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:alpha="0.35"
+                    android:scaleType="fitXY"
+                    android:visibility="gone"
+                    android:clickable="false"
+                    android:focusable="false" />
+
+                <Button
+                    android:id="@+id/btnMeasure"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="bottom"
+                    android:layout_marginBottom="12dp"
+                    android:paddingStart="60dp"
+                    android:paddingEnd="60dp"
+                    android:text="치수 재기"
+                    android:textAllCaps="false"
+                    android:textSize="18sp"
+                    android:visibility="gone" />
+
+                
+
+        <!-- ✅ 치수 재기 (Manual 모드에서 50/200MP 선택 버튼) -->
+        <LinearLayout
+            android:id="@+id/layoutManualMeasureButtons"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:layout_marginBottom="12dp"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:visibility="gone">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnMeasure50"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:layout_marginEnd="8dp"
+                android:text="50 MP로 측정"
+                android:textAllCaps="false"
+                android:textSize="18sp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnMeasure200"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:text="200 MP로 측정"
+                android:textAllCaps="false"
+                android:textSize="18sp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp" />
+        </LinearLayout>
+<FrameLayout
+                    android:id="@+id/capturedOverlay"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:visibility="gone"
+                    android:background="#FF000000"
+                    android:clickable="true"
+                    android:focusable="true">
+
+                    <ImageView
+                        android:id="@+id/capturedImageView"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:scaleType="fitCenter"
+                        android:adjustViewBounds="true" />
+
+                    <!-- ✅ 측정 완료 후(결과 이미지 + PASS/FAIL 화살표 표시 시) 재측정 버튼 표시 -->
+                    <LinearLayout
+                        android:id="@+id/layoutRetryResultButtons"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="bottom|center_horizontal"
+                        android:orientation="horizontal"
+                        android:padding="10dp"
+                        android:gravity="center"
+                        android:background="@android:color/transparent"
+                        android:visibility="gone">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnRetryResult50"
+                            android:layout_width="wrap_content"
+                            android:layout_height="48dp"
+                            android:layout_marginEnd="10dp"
+                            android:minWidth="0dp"
+                            android:paddingStart="16dp"
+                            android:paddingEnd="16dp"
+                            android:alpha="0.5"
+                            android:text="50MP로 재측정"
+                            android:textAllCaps="false"
+                            android:tooltipText="50MP 기반으로 처음부터 재시도" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnRetryResult200"
+                            android:layout_width="wrap_content"
+                            android:layout_height="48dp"
+                            android:minWidth="0dp"
+                            android:paddingStart="16dp"
+                            android:paddingEnd="16dp"
+                            android:alpha="0.5"
+                            android:text="200MP로 재측정"
+                            android:textAllCaps="false"
+                            android:tooltipText="200MP 기반으로 처음부터 재시도" />
+                    </LinearLayout>
+                </FrameLayout>
+
+            </FrameLayout>
+        </androidx.constraintlayout.widget.ConstraintLayout>
+
+        <!-- 동쪽 : Right Buttons + Right Arrow -->
+        <FrameLayout
+            android:id="@+id/rightPanel"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1.4"
+            android:background="@android:color/white">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical">
+
+                <!-- 오른쪽 3개 버튼(아이콘) : Thermo(치수분석) / Capture / Gallery -->
+                <LinearLayout
+                    android:id="@+id/rightButtonBar"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:padding="2dp"
+                    android:gravity="center">
+
+                    <!-- Capture : capature.png -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnCapturePreview"
+                        android:layout_width="0dp"
+                        android:layout_height="30dp"
+                        android:layout_weight="1"
+                        android:layout_margin="2dp"
+                        android:minWidth="0dp"
+                        android:minHeight="0dp"
+                        android:insetLeft="0dp"
+                        android:insetRight="0dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:padding="0dp"
+                        android:text=""
+                        android:contentDescription="Capture"
+                        android:tooltipText="짧게: 프리뷰 저장\n길게: Ref 저장"
+                        android:backgroundTint="#E5E5E5"
+                        app:strokeColor="#707070"
+                        app:strokeWidth="0.5dp"
+                        app:icon="@drawable/capture"
+                        app:iconTint="@null"
+                        app:iconSize="28dp"
+                        app:iconPadding="0dp" />
+
+                    <!-- Gallery : gallery.png -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnGallery"
+                        android:layout_width="0dp"
+                        android:layout_height="30dp"
+                        android:layout_weight="1"
+                        android:layout_margin="2dp"
+                        android:minWidth="0dp"
+                        android:minHeight="0dp"
+                        android:insetLeft="0dp"
+                        android:insetRight="0dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:padding="0dp"
+                        android:text=""
+                        android:contentDescription="Gallery"
+                        android:tooltipText="짧게: 앱 갤러리\n길게: 삼성 갤러리 이동"
+                        android:backgroundTint="#E5E5E5"
+                        app:strokeColor="#707070"
+                        app:strokeWidth="0.5dp"
+                        app:icon="@drawable/gallery"
+                        app:iconTint="@null"
+                        app:iconSize="28dp"
+                        app:iconPadding="0dp" />
+
+                    <FrameLayout
+                        android:id="@+id/btnCaptureContainer"
+                        android:layout_width="0dp"
+                        android:layout_height="30dp"
+                        android:layout_weight="1"
+                        android:layout_margin="2dp"
+                        android:clipChildren="false"
+                        android:clipToPadding="false">
+                        <!-- ✅ Grid Calibration 토글 (기존 thermo 버튼 영역을 대체) -->
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnStatus"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:insetLeft="0dp"
+                            android:insetRight="0dp"
+                            android:insetTop="0dp"
+                            android:insetBottom="0dp"
+                            android:padding="0dp"
+                            android:text=""
+                            android:contentDescription="Calibration"
+                            android:tooltipText="짧게: 상태/오프셋\n길게: 버튼 도움말"
+                            android:backgroundTint="#FFFFFF"
+                            app:strokeColor="#666666"
+                            app:strokeWidth="0.5dp"
+                            app:icon="@drawable/status"
+                            app:iconTint="@null"
+                            app:iconSize="28dp"
+                            app:iconPadding="0dp" />
+                        <!-- 🔥 온도 표시 오버레이 -->
+                        <TextView
+                            android:id="@+id/txtTempOverlay"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="top|center_horizontal"
+                            android:layout_marginTop="1dp"
+                            android:elevation="6dp"
+                            android:text="--.-"
+                            android:textSize="10sp"
+                            android:textStyle="bold"
+                            android:textColor="#AA000000"
+                            android:background="@drawable/bg_temp_chip"
+                            android:paddingStart="1dp"
+                            android:paddingEnd="1dp"
+                            android:paddingTop="0dp"
+                            android:paddingBottom="0dp" />
+                    </FrameLayout>
+                </LinearLayout>
+
+                <!-- 오른쪽 화살표 영역 -->
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:background="@android:color/white">
+
+                    <ImageView
+                        android:id="@+id/imgRightArrow"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"
+                        android:scaleType="centerInside"
+                        android:src="@drawable/right_arrow"
+                        android:visibility="gone"/>
+                </FrameLayout>
+
+            </LinearLayout>
+        </FrameLayout>
+
+    </LinearLayout>
+
+    <!-- 하단 Status : 전체 폭을 쓰지 않고 Preview 폭(가운데 컬럼)과 align -->
+    <LinearLayout
+        android:id="@+id/bottomStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="2dp"
+        android:background="@android:color/white">
+
+        <!-- 좌/우는 여백(= side panel과 동일 비율) -->
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1.4" />
+
+        <TextView
+            android:id="@+id/txtStatus"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="8"
+            android:padding="4dp"
+            android:textSize="11sp"
+            android:textColor="@android:color/black"
+            android:singleLine="true"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:gravity="center_vertical" />
+
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1.4" />
+    </LinearLayout>
+
+</LinearLayout>

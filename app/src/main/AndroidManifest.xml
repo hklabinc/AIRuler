@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 패키지 가시성: 삼성 카메라/전체 카메라 UI 조회 -->
+    <queries>
+        <package android:name="com.sec.android.app.camera" />
+        <package android:name="com.samsung.android.app.galaxyraw" />
+        <!-- ✅ Home 버튼 길게 누름: 삼성 인터넷 브라우저 실행(패키지 가시성 보장) -->
+        <package android:name="com.sec.android.app.sbrowser" />
+        <intent>
+            <action android:name="android.media.action.STILL_IMAGE_CAMERA" />
+        </intent>
+    </queries>
+
+    <!-- 카메라 사용 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" />
+
+    <!-- Foreground service -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- 알림 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- 저장소 / 이미지 접근 -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
+    <uses-permission android:name="android.permission.INTERNET"/>
+
+    <application
+        android:allowBackup="true"
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
+        android:theme="@style/Theme.Material3.DayNight.NoActionBar">
+
+        <!-- ✅ 1. 앱 시작 화면: 모델 선택 -->
+        <activity
+            android:name=".model.ModelSelectActivity"
+            android:theme="@style/Theme.AIRuler.Settings"
+            android:exported="true"
+            android:screenOrientation="landscape">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- ✅ 2. 메인 카메라 / YOLO 화면 -->
+        <activity
+            android:name=".MainActivity"
+            android:theme="@style/Theme.AIRuler.Settings"
+            android:exported="true"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+
+        <!-- 설정 화면 -->
+        <activity
+            android:name=".SettingsActivity"
+            android:theme="@style/Theme.AIRuler.Settings"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
+        <activity android:name=".StatusActivity"
+            android:theme="@style/Theme.AIRuler.Settings"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
+        <!-- 갤러리 화면 -->
+
+        <!-- 갤러리 폴더 선택 화면 -->
+        <activity
+            android:name=".gallery.AirulerGalleryFoldersActivity"
+            android:theme="@style/Theme.AIRuler.Settings"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
+        <activity
+            android:name=".gallery.AirulerGalleryActivity"
+            android:theme="@style/Theme.AIRuler.Settings"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
+        <!-- 이미지 단일 뷰어(Zoom/Pan) -->
+        <activity
+            android:name=".gallery.AirulerImageViewerActivity"
+            android:theme="@style/Theme.AIRuler.Settings"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
+
+        <!-- 결과 이미지 EXIF(UserComment) 측정값 뷰어 -->
+        <activity
+            android:name=".gallery.AirulerMeasureValuesActivity"
+            android:theme="@style/Theme.AIRuler.Settings"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
+        <!-- internal/models - json/tflite 목록 -->
+        <activity
+            android:name=".gallery.AirulerInternalFilesActivity"
+            android:theme="@style/Theme.AIRuler.Settings"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
+        <!-- json 내용 뷰어 -->
+        <activity
+            android:name=".gallery.AirulerJsonViewerActivity"
+            android:theme="@style/Theme.AIRuler.Settings"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
+        <!-- 촬영 감지/복귀용 Foreground Service -->
+        <service
+            android:name=".autoreturn.ReturnWatcherService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- 접근성 서비스 -->
+        <service
+            android:name=".autoreturn.ReturnAccessibilityService"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/auto_return_accessibility_config" />
+        </service>
+
+        <!-- 삼성 카메라 실행 프록시 -->
+        <activity
+            android:name=".samsungcapture.SamsungCameraProxyActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:finishOnTaskLaunch="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar.Fullscreen" />
+
+    
+
+        <!-- Expert RAW 실행 프록시 (200MP) -->
+        <activity
+            android:name=".samsungcapture.ExpertRawProxyActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:finishOnTaskLaunch="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar.Fullscreen" />
+</application>
+</manifest>

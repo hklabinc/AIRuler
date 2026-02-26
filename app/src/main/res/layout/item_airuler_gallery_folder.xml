@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="4dp"
+    android:layout_margin="2dp"
+    android:background="#222222">
+
+    <com.hklab.airuler.gallery.SquareFrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:foreground="?attr/selectableItemBackground">
+
+        <ImageView
+            android:id="@+id/imgFolderThumb"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@android:color/black"
+            android:scaleType="fitCenter" />
+
+    </com.hklab.airuler.gallery.SquareFrameLayout>
+
+    <TextView
+        android:id="@+id/txtFolderName"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Folder"
+        android:textColor="@android:color/white"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:layout_marginTop="4dp" />
+
+    <TextView
+        android:id="@+id/txtFolderCount"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="0"
+        android:textColor="#BBBBBB"
+        android:textSize="10sp"
+        android:layout_marginTop="2dp" />
+
+</LinearLayout>

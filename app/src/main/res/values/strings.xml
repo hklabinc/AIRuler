@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">AIRuler</string>
+    <string name="auto_return_accessibility_desc">Auto return to AIRuler</string>
+</resources>
