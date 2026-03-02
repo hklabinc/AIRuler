@@ -105,16 +105,19 @@ class MeasurementPipeline(
     @Volatile private var watchdogRunnable: Runnable? = null
 
     // ✅ 측정 watchdog: 일정 시간 내 결과가 표시되지 않으면(교착/무한 대기) UI/상태를 복구
-    // - 정상 경로에서는 “절대 사용되지 않는” 안전망이므로, 너무 길게 잡을 필요가 없습니다.
-    // - 반대로 너무 짧으면, (극단적으로 느린 저장/부하 상황에서) 정상 측정까지 TIMEOUT으로 오인할 수 있습니다.
-    // - 50MP는 통상 1~3초 내, 200MP는 더 오래 걸릴 수 있어 MP에 따라 구분합니다.
+    // - 정상 케이스에서는 거의 발동하지 않지만, 문제 발생 시 "복구까지 기다리는 시간"을 줄이기 위해
+    //   MP에 따라 값을 분리합니다(200MP가 50MP보다 저장/후처리/IO가 느릴 수 있음).
     private val MEASURE_WATCHDOG_MS_50MP = 20_000L
     private val MEASURE_WATCHDOG_MS_200MP = 35_000L
+    private fun measureWatchdogMsFor(captureMp: Int): Long =
+        if (captureMp >= 200) MEASURE_WATCHDOG_MS_200MP else MEASURE_WATCHDOG_MS_50MP
 
     // ✅ MediaStore 이미지(특히 50MP/200MP)의 “저장 완료” 안정화 대기 파라미터
-    // - 정상에서는 수백 ms 내에 OK가 나며, TIMEOUT은 “문제 발생 시 복구를 빠르게” 하기 위한 상한입니다.
+    // - 안정화가 끝나면 즉시 진행되므로, 이 값은 "이상 상황에서 기다리는 최대치"입니다.
     private val MEDIA_READY_MAX_WAIT_MS_50MP = 15_000L
     private val MEDIA_READY_MAX_WAIT_MS_200MP = 40_000L
+    private fun mediaReadyMaxWaitMsFor(captureMp: Int): Long =
+        if (captureMp >= 200) MEDIA_READY_MAX_WAIT_MS_200MP else MEDIA_READY_MAX_WAIT_MS_50MP
     // Polling interval is intentionally small so that “already-ready” images do not incur ~0.7s latency.
     // We still protect against half-written files by requiring a minimum stable-duration below.
     private val MEDIA_READY_POLL_MS = 100L
@@ -147,8 +150,6 @@ class MeasurementPipeline(
     private fun waitForMediaStoreImageReady(uri: Uri, token: Long, purpose: String): Boolean {
         val start = SystemClock.elapsedRealtime()
 
-        val maxWaitMs = if (GlobalParams.CAPTURE_MP >= 200) MEDIA_READY_MAX_WAIT_MS_200MP else MEDIA_READY_MAX_WAIT_MS_50MP
-
         var lastSize = -1L
         var stableSamples = 0
         var stableSinceElapsed = -1L
@@ -157,9 +158,12 @@ class MeasurementPipeline(
         val minStableMs =
             if (GlobalParams.CAPTURE_MP >= 200) MEDIA_READY_MIN_STABLE_MS_200MP else MEDIA_READY_MIN_STABLE_MS_50MP
 
+        val captureMp = GlobalParams.CAPTURE_MP
+        val maxWaitMs = mediaReadyMaxWaitMsFor(captureMp)
+
         AirulerFileLogger.i(
             "Measurement",
-            "waitMediaReady start purpose=$purpose token=$token uri=$uri minStableMs=$minStableMs pollMs=$MEDIA_READY_POLL_MS maxWaitMs=$maxWaitMs"
+            "waitMediaReady start purpose=$purpose token=$token uri=$uri minStableMs=$minStableMs maxWaitMs=$maxWaitMs pollMs=$MEDIA_READY_POLL_MS"
         )
 
         while (SystemClock.elapsedRealtime() - start < maxWaitMs) {
@@ -206,7 +210,7 @@ class MeasurementPipeline(
         val waited = SystemClock.elapsedRealtime() - start
         AirulerFileLogger.e(
             "Measurement",
-            "waitMediaReady TIMEOUT purpose=$purpose waitedMs=$waited token=$token uri=$uri"
+            "waitMediaReady TIMEOUT purpose=$purpose waitedMs=$waited maxWaitMs=$maxWaitMs token=$token uri=$uri"
         )
 
         // UI/상태 복구(사용자가 Retry 가능)
@@ -214,7 +218,7 @@ class MeasurementPipeline(
             // 더 최신 캡처가 시작되었으면 무시
             if (state.currentSamsungCaptureToken != token) return@runOnUiThread
             showToast("사진 저장이 아직 완료되지 않았습니다. 잠시 후 Retry 해주세요.")
-                    appendStatus("사진 저장 지연/대기 시간 초과(> ${maxWaitMs}ms). Retry 권장")
+            appendStatus("사진 저장 지연/대기 시간 초과(> ${maxWaitMs}ms). Retry 권장")
             state.finishMeasuring(clearPending = false)
             hideCapturedOverlay()
         }
@@ -273,7 +277,7 @@ class MeasurementPipeline(
             val elapsed = SystemClock.elapsedRealtime() - capturedAtElapsedMs
             AirulerFileLogger.e(
                 "Measurement",
-                "WATCHDOG TIMEOUT token=$token elapsedMs=$elapsed finalizeAfterMeasure=$finalizeAfterMeasure uri=$uri"
+                "WATCHDOG TIMEOUT token=$token elapsedMs=$elapsed watchdogMs=$watchdogMs finalizeAfterMeasure=$finalizeAfterMeasure uri=$uri"
             )
 
             // ✅ 토큰 무효화: 진행 중이던(또는 향후 늦게 끝나는) 백그라운드 작업이
@@ -300,7 +304,7 @@ class MeasurementPipeline(
 
             // (디버그) watchdog 발동 시점 기록
             val dtFromSchedule = SystemClock.elapsedRealtime() - scheduledAt
-            AirulerFileLogger.w("Measurement", "watchdog fired. dtFromScheduleMs=$dtFromSchedule")
+            AirulerFileLogger.w("Measurement", "watchdog fired. watchdogMs=$watchdogMs dtFromScheduleMs=$dtFromSchedule")
         }
 
         watchdogRunnable = r
@@ -412,16 +416,15 @@ class MeasurementPipeline(
         //    "현재 Preview의 마지막 프레임"을 캡처해 오버레이에 고정 표시합니다.
         showSamsungCapturedLoading(token)
 
-        val watchdogMs = if (effectiveCaptureMp >= 200) MEASURE_WATCHDOG_MS_200MP else MEASURE_WATCHDOG_MS_50MP
-
         // ✅ 교착/무한 대기 대비 Watchdog
         // - 결과가 일정 시간 내 표시되지 않으면 UI/상태를 복구하고 측정 executor를 재생성
+        val watchdogMs = measureWatchdogMsFor(effectiveCaptureMp)
         scheduleMeasureWatchdog(
             token = token,
             uri = uri,
             capturedAtElapsedMs = onCapturedAt,
             finalizeAfterMeasure = finalizeAfterMeasure,
-            watchdogMs = watchdogMs
+            watchdogMs = watchdogMs,
         )
 
         // 모델이 없으면 오버레이를 닫고 종료
@@ -1486,6 +1489,24 @@ class MeasurementPipeline(
         val errMm: Double?,
         val marginMm: Double?,
         val result: String?,
+        /**
+         * ✅ EXIF(UserComment) JSON 저장 시 사용할 offset 조회용 원본 키.
+         *
+         * - 일반 모델: index == offsetMeasureIndex
+         * - L1824-03/L1825-03 (double-film split):
+         *   - index: "CP1" 처럼 suffix(-1/-2) 제거된 값
+         *   - offsetMeasureIndex: "CP1-1" 또는 "CP1-2" 처럼 원본 measure 키
+         */
+        val offsetMeasureIndex: String = index,
+        /**
+         * ✅ offset 조회용 원본 film index.
+         *
+         * - 일반 모델: filmIndex == offsetFilmIndex
+         * - L1824-03/L1825-03 (double-film split):
+         *   - filmIndex: split 후 film 번호(1..N)
+         *   - offsetFilmIndex: YOLO 검출 film 번호(원본 Film#)
+         */
+        val offsetFilmIndex: Int = filmIndex,
     )
 
     /**
@@ -1517,34 +1538,123 @@ class MeasurementPipeline(
         val offsetSnapshot = GridOnlineOffsetCalibrationStore.snapshotOffsets(modelBase)
         val offsetMapFallback = loadMeasureOffsetMap(modelName)
 
+        // ✅ (요구사항)
+        // L1824-03 / L1825-03 모델은 1개의 "검출 film"(YOLO bbox) 안에 실제 film이 2장(-1/-2) 포함됩니다.
+        // - measure index의 접미사 "-1" / "-2" 는 "필름 번호"를 의미
+        // - 결과 JSON에는 이를 split 하여 film 번호를 재부여하여 저장
+        //   (검출 Film#1: -1 => Film#1, -2 => Film#2)
+        //   (검출 Film#2: -1 => Film#3, -2 => Film#4) ...
+        val isDoubleFilmSplitModel: Boolean = run {
+            val b = modelBase.trim()
+            b.equals("L1824-03", ignoreCase = true) || b.equals("L1825-03", ignoreCase = true)
+        }
+
+        val reDoubleFilmSuffix = Regex("^(.*)-(1|2)$")
+
+        fun stripDoubleFilmSuffix(idx: String): String {
+            val t = idx.trim()
+            val m = reDoubleFilmSuffix.find(t)
+            return if (m != null) m.groupValues[1].trim() else t
+        }
+
+        fun normalizeMeasureOrderForDoubleFilm(order: List<String>): List<String> {
+            val ordered = LinkedHashSet<String>()
+            for (x in order) {
+                val baseIdx = stripDoubleFilmSuffix(x)
+                if (baseIdx.isNotBlank()) ordered.add(baseIdx)
+            }
+            return ordered.toList()
+        }
+
+        fun splitParsedMeasuresForDoubleFilm(
+            original: Map<Int, List<ParsedMeasureLine>>
+        ): Map<Int, List<ParsedMeasureLine>> {
+            val out = LinkedHashMap<Int, MutableList<ParsedMeasureLine>>()
+
+            // 원본(검출) film index 기준으로 안정적으로 순회
+            val entries = original.entries.sortedBy { it.key }
+            for ((origFilmIdx, measures) in entries) {
+                for (m in measures) {
+                    val rawIndex = m.index.trim()
+                    val mo = reDoubleFilmSuffix.find(rawIndex)
+
+                    if (mo != null) {
+                        val baseIdx = mo.groupValues[1].trim()
+                        val suffix = mo.groupValues[2].toIntOrNull() ?: 1
+
+                        // (검출 Film#k) 의 -1 => Film#(2k-1), -2 => Film#(2k)
+                        val newFilmIdx = (origFilmIdx - 1) * 2 + suffix
+
+                        val nm = m.copy(
+                            filmIndex = newFilmIdx,
+                            index = baseIdx,
+                            offsetMeasureIndex = rawIndex,
+                            offsetFilmIndex = origFilmIdx,
+                        )
+                        out.getOrPut(newFilmIdx) { mutableListOf() }.add(nm)
+                    } else {
+                        // 방어적 fallback: suffix가 없으면 첫 번째 film(-1)로 귀속
+                        val newFilmIdx = (origFilmIdx - 1) * 2 + 1
+                        val nm = m.copy(
+                            filmIndex = newFilmIdx,
+                            offsetMeasureIndex = rawIndex,
+                            offsetFilmIndex = origFilmIdx,
+                        )
+                        out.getOrPut(newFilmIdx) { mutableListOf() }.add(nm)
+                    }
+                }
+            }
+
+            // key 오름차순으로 정렬된 Map 반환
+            val sorted = LinkedHashMap<Int, List<ParsedMeasureLine>>()
+            out.keys.sorted().forEach { k ->
+                sorted[k] = out[k]?.toList().orEmpty()
+            }
+            return sorted
+        }
+
         // ✅ 모델명.json에 적힌 measure 정의 순서를 EXIF 결과에도 그대로 반영
-        val measureOrder = loadMeasureIndexOrder(modelName)
+        val measureOrderRaw = loadMeasureIndexOrder(modelName)
+        val measureOrder = if (isDoubleFilmSplitModel) {
+            normalizeMeasureOrderForDoubleFilm(measureOrderRaw)
+        } else {
+            measureOrderRaw
+        }
         val measureOrderRank: Map<String, Int> = if (measureOrder.isNotEmpty()) {
             measureOrder.withIndex().associate { (i, name) -> name to i }
         } else {
             emptyMap()
         }
 
-        val parsed = parseMeasureLinesFromLogs(logs)
-            .entries
-            .sortedBy { it.key }
+        val parsedRawMap = parseMeasureLinesFromLogs(logs)
+        val parsedMap: Map<Int, List<ParsedMeasureLine>> = if (isDoubleFilmSplitModel) {
+            splitParsedMeasuresForDoubleFilm(parsedRawMap)
+        } else {
+            parsedRawMap
+        }
+        val parsedEntries = parsedMap.entries.sortedBy { it.key }
+
+        // ✅ 결과 JSON 기준 detectedFilms (double-film split 모델은 *2)
+        val detectedFilmsForJson = if (isDoubleFilmSplitModel) detectedFilms * 2 else detectedFilms
 
         // --- decisionPerFilm / decision (PASS/FAIL)
         // decisionPerFilm: detectedFilms 개수만큼 순서대로 저장
         // - 각 film: measures 의 result 가 모두 PASS 이면 PASS, 하나라도 FAIL(또는 result 누락) 이면 FAIL
         // decision: 모든 film 이 PASS 인 경우에만 PASS, 하나라도 FAIL 이면 FAIL
         fun isFilmPass(filmIndex: Int): Boolean {
-            val measures = parsed.firstOrNull { it.key == filmIndex }?.value
+            val measures = parsedMap[filmIndex]
             if (measures.isNullOrEmpty()) return false
             return measures.all { it.result == "PASS" }
         }
 
         val decisionPerFilm = JSONArray().apply {
-            for (filmIdx in 1..detectedFilms) {
+            for (filmIdx in 1..detectedFilmsForJson) {
                 put(if (isFilmPass(filmIdx)) "PASS" else "FAIL")
             }
         }
-        val decision = if (detectedFilms > 0 && (1..detectedFilms).all { isFilmPass(it) }) "PASS" else "FAIL"
+        val decision = if (
+            detectedFilmsForJson > 0 && (1..detectedFilmsForJson).all { isFilmPass(it) }
+        ) "PASS" else "FAIL"
 
         val root = JSONObject().apply {
             put("schema", "AIRulerFilmMeasureResult/v2")
@@ -1563,7 +1673,7 @@ class MeasurementPipeline(
             // - capturedUri
             put("modelName", modelName)
             put("measureMethod", measureMethod)
-            put("detectedFilms", detectedFilms)
+            put("detectedFilms", detectedFilmsForJson)
 
             put("image", JSONObject().apply {
                 put("width", imageW)
@@ -1589,7 +1699,7 @@ class MeasurementPipeline(
 
             // Film별 측정 결과
             put("results", JSONArray().apply {
-                parsed.forEach { (filmIdx, measures) ->
+                parsedEntries.forEach { (filmIdx, measures) ->
                     put(JSONObject().apply {
                         put("film", filmIdx)
                         put("measures", JSONArray().apply {
@@ -1615,8 +1725,8 @@ class MeasurementPipeline(
                                     // ✅ offset: film별 적용값
                                     // - 우선: 이번 측정 세션에서 실제 사용된 값(Store snapshot)
                                     // - fallback: 모델 JSON(measure_*.offset)에서 filmIndex에 해당하는 토큰
-                                    val off = offsetSnapshot[m.index]?.get(filmIdx)
-                                        ?: parseOffsetFromField(offsetMapFallback[m.index], filmIdx)
+                                    val off = offsetSnapshot[m.offsetMeasureIndex]?.get(m.offsetFilmIndex)
+                                        ?: parseOffsetFromField(offsetMapFallback[m.offsetMeasureIndex], m.offsetFilmIndex)
                                     // ✅ 요청사항: offset 은 소수점 6자리까지만 저장
                                     // - JSON 숫자 길이를 줄이되, 기존 로직/값의 의미는 유지(반올림)
                                     val offRounded = BigDecimal.valueOf(off)

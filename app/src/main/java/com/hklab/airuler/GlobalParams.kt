@@ -93,7 +93,7 @@ object GlobalParams {
         const val DIRECTION_CHECK_ENABLED: Boolean = true
 
         // YOLO interval (Settings) - UI range: 1..10
-        const val YOLO_INTERVAL_DEFAULT: Int = 5
+        const val YOLO_INTERVAL_DEFAULT: Int = 3
         const val YOLO_INTERVAL_MIN: Int = 1
         const val YOLO_INTERVAL_MAX: Int = 10
     }

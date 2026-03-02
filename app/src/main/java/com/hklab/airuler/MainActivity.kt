@@ -268,7 +268,8 @@ class MainActivity : AppCompatActivity() {
         //    백그라운드에서 1회 warm-up을 수행합니다.
         // - 실패해도 앱 동작에 영향이 없어야 하므로 runCatching으로 감쌉니다.
         runCatching {
-            val model = selectedModelName ?: ModelStore.get(this)
+            // ModelStore.get(...)가 nullable(String?)일 수 있어, warm-up 호출 전에 non-null을 보장합니다.
+            val model: String = selectedModelName ?: ModelStore.get(this) ?: return@runCatching
             if (AppSessionSettings.captureMegapixel < 200 && AppSessionSettings.measurementMethod == MeasurementMethod.GRID) {
                 backgroundExecutor.execute {
                     FilmTotalMeasureGridProcessor.prewarm(applicationContext, model)
@@ -298,8 +299,11 @@ class MainActivity : AppCompatActivity() {
             // ✅ 모델 변경 시에도 warm-up(첫 촬영 지연 완화)
             runCatching {
                 if (AppSessionSettings.captureMegapixel < 200 && AppSessionSettings.measurementMethod == MeasurementMethod.GRID) {
+                    // newModel은 nullable(String?)이고, 람다(Executor) 캡처 시 smart-cast가 풀릴 수 있어
+                    // non-null local val로 고정한 뒤 전달합니다.
+                    val modelForWarmup: String = newModel ?: return@runCatching
                     backgroundExecutor.execute {
-                        FilmTotalMeasureGridProcessor.prewarm(applicationContext, newModel)
+                        FilmTotalMeasureGridProcessor.prewarm(applicationContext, modelForWarmup)
                     }
                 }
             }
