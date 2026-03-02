@@ -1474,6 +1474,24 @@ class MeasurementPipeline(
         val errMm: Double?,
         val marginMm: Double?,
         val result: String?,
+        /**
+         * ✅ EXIF(UserComment) JSON 저장 시 사용할 offset 조회용 원본 키.
+         *
+         * - 일반 모델: index == offsetMeasureIndex
+         * - L1824-03/L1825-03 (double-film split):
+         *   - index: "CP1" 처럼 suffix(-1/-2) 제거된 값
+         *   - offsetMeasureIndex: "CP1-1" 또는 "CP1-2" 처럼 원본 measure 키
+         */
+        val offsetMeasureIndex: String = index,
+        /**
+         * ✅ offset 조회용 원본 film index.
+         *
+         * - 일반 모델: filmIndex == offsetFilmIndex
+         * - L1824-03/L1825-03 (double-film split):
+         *   - filmIndex: split 후 film 번호(1..N)
+         *   - offsetFilmIndex: YOLO 검출 film 번호(원본 Film#)
+         */
+        val offsetFilmIndex: Int = filmIndex,
     )
 
     /**
@@ -1505,34 +1523,123 @@ class MeasurementPipeline(
         val offsetSnapshot = GridOnlineOffsetCalibrationStore.snapshotOffsets(modelBase)
         val offsetMapFallback = loadMeasureOffsetMap(modelName)
 
+        // ✅ (요구사항)
+        // L1824-03 / L1825-03 모델은 1개의 "검출 film"(YOLO bbox) 안에 실제 film이 2장(-1/-2) 포함됩니다.
+        // - measure index의 접미사 "-1" / "-2" 는 "필름 번호"를 의미
+        // - 결과 JSON에는 이를 split 하여 film 번호를 재부여하여 저장
+        //   (검출 Film#1: -1 => Film#1, -2 => Film#2)
+        //   (검출 Film#2: -1 => Film#3, -2 => Film#4) ...
+        val isDoubleFilmSplitModel: Boolean = run {
+            val b = modelBase.trim()
+            b.equals("L1824-03", ignoreCase = true) || b.equals("L1825-03", ignoreCase = true)
+        }
+
+        val reDoubleFilmSuffix = Regex("^(.*)-(1|2)$")
+
+        fun stripDoubleFilmSuffix(idx: String): String {
+            val t = idx.trim()
+            val m = reDoubleFilmSuffix.find(t)
+            return if (m != null) m.groupValues[1].trim() else t
+        }
+
+        fun normalizeMeasureOrderForDoubleFilm(order: List<String>): List<String> {
+            val ordered = LinkedHashSet<String>()
+            for (x in order) {
+                val baseIdx = stripDoubleFilmSuffix(x)
+                if (baseIdx.isNotBlank()) ordered.add(baseIdx)
+            }
+            return ordered.toList()
+        }
+
+        fun splitParsedMeasuresForDoubleFilm(
+            original: Map<Int, List<ParsedMeasureLine>>
+        ): Map<Int, List<ParsedMeasureLine>> {
+            val out = LinkedHashMap<Int, MutableList<ParsedMeasureLine>>()
+
+            // 원본(검출) film index 기준으로 안정적으로 순회
+            val entries = original.entries.sortedBy { it.key }
+            for ((origFilmIdx, measures) in entries) {
+                for (m in measures) {
+                    val rawIndex = m.index.trim()
+                    val mo = reDoubleFilmSuffix.find(rawIndex)
+
+                    if (mo != null) {
+                        val baseIdx = mo.groupValues[1].trim()
+                        val suffix = mo.groupValues[2].toIntOrNull() ?: 1
+
+                        // (검출 Film#k) 의 -1 => Film#(2k-1), -2 => Film#(2k)
+                        val newFilmIdx = (origFilmIdx - 1) * 2 + suffix
+
+                        val nm = m.copy(
+                            filmIndex = newFilmIdx,
+                            index = baseIdx,
+                            offsetMeasureIndex = rawIndex,
+                            offsetFilmIndex = origFilmIdx,
+                        )
+                        out.getOrPut(newFilmIdx) { mutableListOf() }.add(nm)
+                    } else {
+                        // 방어적 fallback: suffix가 없으면 첫 번째 film(-1)로 귀속
+                        val newFilmIdx = (origFilmIdx - 1) * 2 + 1
+                        val nm = m.copy(
+                            filmIndex = newFilmIdx,
+                            offsetMeasureIndex = rawIndex,
+                            offsetFilmIndex = origFilmIdx,
+                        )
+                        out.getOrPut(newFilmIdx) { mutableListOf() }.add(nm)
+                    }
+                }
+            }
+
+            // key 오름차순으로 정렬된 Map 반환
+            val sorted = LinkedHashMap<Int, List<ParsedMeasureLine>>()
+            out.keys.sorted().forEach { k ->
+                sorted[k] = out[k]?.toList().orEmpty()
+            }
+            return sorted
+        }
+
         // ✅ 모델명.json에 적힌 measure 정의 순서를 EXIF 결과에도 그대로 반영
-        val measureOrder = loadMeasureIndexOrder(modelName)
+        val measureOrderRaw = loadMeasureIndexOrder(modelName)
+        val measureOrder = if (isDoubleFilmSplitModel) {
+            normalizeMeasureOrderForDoubleFilm(measureOrderRaw)
+        } else {
+            measureOrderRaw
+        }
         val measureOrderRank: Map<String, Int> = if (measureOrder.isNotEmpty()) {
             measureOrder.withIndex().associate { (i, name) -> name to i }
         } else {
             emptyMap()
         }
 
-        val parsed = parseMeasureLinesFromLogs(logs)
-            .entries
-            .sortedBy { it.key }
+        val parsedRawMap = parseMeasureLinesFromLogs(logs)
+        val parsedMap: Map<Int, List<ParsedMeasureLine>> = if (isDoubleFilmSplitModel) {
+            splitParsedMeasuresForDoubleFilm(parsedRawMap)
+        } else {
+            parsedRawMap
+        }
+        val parsedEntries = parsedMap.entries.sortedBy { it.key }
+
+        // ✅ 결과 JSON 기준 detectedFilms (double-film split 모델은 *2)
+        val detectedFilmsForJson = if (isDoubleFilmSplitModel) detectedFilms * 2 else detectedFilms
 
         // --- decisionPerFilm / decision (PASS/FAIL)
         // decisionPerFilm: detectedFilms 개수만큼 순서대로 저장
         // - 각 film: measures 의 result 가 모두 PASS 이면 PASS, 하나라도 FAIL(또는 result 누락) 이면 FAIL
         // decision: 모든 film 이 PASS 인 경우에만 PASS, 하나라도 FAIL 이면 FAIL
         fun isFilmPass(filmIndex: Int): Boolean {
-            val measures = parsed.firstOrNull { it.key == filmIndex }?.value
+            val measures = parsedMap[filmIndex]
             if (measures.isNullOrEmpty()) return false
             return measures.all { it.result == "PASS" }
         }
 
         val decisionPerFilm = JSONArray().apply {
-            for (filmIdx in 1..detectedFilms) {
+            for (filmIdx in 1..detectedFilmsForJson) {
                 put(if (isFilmPass(filmIdx)) "PASS" else "FAIL")
             }
         }
-        val decision = if (detectedFilms > 0 && (1..detectedFilms).all { isFilmPass(it) }) "PASS" else "FAIL"
+        val decision = if (
+            detectedFilmsForJson > 0 && (1..detectedFilmsForJson).all { isFilmPass(it) }
+        ) "PASS" else "FAIL"
 
         val root = JSONObject().apply {
             put("schema", "AIRulerFilmMeasureResult/v2")
@@ -1551,7 +1658,7 @@ class MeasurementPipeline(
             // - capturedUri
             put("modelName", modelName)
             put("measureMethod", measureMethod)
-            put("detectedFilms", detectedFilms)
+            put("detectedFilms", detectedFilmsForJson)
 
             put("image", JSONObject().apply {
                 put("width", imageW)
@@ -1577,7 +1684,7 @@ class MeasurementPipeline(
 
             // Film별 측정 결과
             put("results", JSONArray().apply {
-                parsed.forEach { (filmIdx, measures) ->
+                parsedEntries.forEach { (filmIdx, measures) ->
                     put(JSONObject().apply {
                         put("film", filmIdx)
                         put("measures", JSONArray().apply {
@@ -1603,8 +1710,8 @@ class MeasurementPipeline(
                                     // ✅ offset: film별 적용값
                                     // - 우선: 이번 측정 세션에서 실제 사용된 값(Store snapshot)
                                     // - fallback: 모델 JSON(measure_*.offset)에서 filmIndex에 해당하는 토큰
-                                    val off = offsetSnapshot[m.index]?.get(filmIdx)
-                                        ?: parseOffsetFromField(offsetMapFallback[m.index], filmIdx)
+                                    val off = offsetSnapshot[m.offsetMeasureIndex]?.get(m.offsetFilmIndex)
+                                        ?: parseOffsetFromField(offsetMapFallback[m.offsetMeasureIndex], m.offsetFilmIndex)
                                     // ✅ 요청사항: offset 은 소수점 6자리까지만 저장
                                     // - JSON 숫자 길이를 줄이되, 기존 로직/값의 의미는 유지(반올림)
                                     val offRounded = BigDecimal.valueOf(off)
