@@ -3,6 +3,8 @@ package com.hklab.airuler.pipeline.measurement
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
@@ -36,12 +38,14 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import androidx.lifecycle.lifecycleScope
 import com.hklab.airuler.net.AirulerResultsUploadClient
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
 import com.hklab.airuler.GlobalParams
+import com.hklab.airuler.log.AirulerFileLogger
 import java.math.BigDecimal
 import java.math.RoundingMode
 
@@ -65,9 +69,234 @@ class MeasurementPipeline(
     private val getSelectedPreviewSize: () -> Size?,
 ) {
 
+    /**
+     * ✅ “측정 전용” executor
+     * - 기존 backgroundExecutor는 InferencePipeline의 IO(Ref 저장 등)와도 공유됩니다.
+     * - 만약 특정 이미지에서 OpenCV decode/IO가 block(교착)되면 single-thread executor 전체가 멈추어
+     *   이후 모든 측정이 영구적으로 대기 상태가 될 수 있습니다.
+     * - 따라서 측정 파이프라인은 별도 executor로 격리하고,
+     *   타임아웃(Watchdog) 발생 시 executor를 재생성하여 복구 경로를 확보합니다.
+     */
+    private val measureExecutorLock = Any()
+    @Volatile private var measureExecutor: ExecutorService = newMeasureExecutor()
+
+    private fun newMeasureExecutor(): ExecutorService = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "airuler-measure").apply {
+            // 디버깅 편의: thread name 고정
+            priority = Thread.NORM_PRIORITY
+        }
+    }
+
+    /** Activity.onDestroy()에서 호출(선택). 호출하지 않아도 동작에는 영향 없음. */
+    fun shutdown() {
+        runCatching { synchronized(measureExecutorLock) { measureExecutor.shutdownNow() } }
+    }
+
+    private fun resetMeasureExecutor(reason: String) {
+        synchronized(measureExecutorLock) {
+            AirulerFileLogger.w("Measurement", "Reset measure executor. reason=$reason")
+            runCatching { measureExecutor.shutdownNow() }
+            measureExecutor = newMeasureExecutor()
+        }
+    }
+
+    private val mainHandler: Handler by lazy { Handler(Looper.getMainLooper()) }
+
+    @Volatile private var watchdogRunnable: Runnable? = null
+
+    // ✅ 측정 watchdog: 일정 시간 내 결과가 표시되지 않으면(교착/무한 대기) UI/상태를 복구
+    private val MEASURE_WATCHDOG_MS = 60_000L
+
+    // ✅ MediaStore 이미지(특히 50MP/200MP)의 “저장 완료” 안정화 대기 파라미터
+    private val MEDIA_READY_MAX_WAIT_MS = 60_000L
+    // Polling interval is intentionally small so that “already-ready” images do not incur ~0.7s latency.
+    // We still protect against half-written files by requiring a minimum stable-duration below.
+    private val MEDIA_READY_POLL_MS = 100L
+    private val MEDIA_READY_POLL_BACKOFF_MULT = 1.25
+    private val MEDIA_READY_POLL_MAX_MS = 800L
+    private val MEDIA_READY_STABLE_COUNT = 2
+
+    // Minimum “stable size” duration before we consider the MediaStore item safe to read.
+    // Samsung Camera 50MP can expose the row early; waiting a short stable window avoids rare IO blocks.
+    private val MEDIA_READY_MIN_STABLE_MS_50MP = 220L
+    private val MEDIA_READY_MIN_STABLE_MS_200MP = 400L
+
     // ✅ 캡처 오버레이에 마지막으로 표시한 Bitmap을 추적해
     //    교체/닫기 시점에 안전하게 recycle 하여 GC/메모리 스파이크를 줄입니다.
     private var lastCapturedOverlayBitmap: Bitmap? = null
+
+    private data class MediaReadySnapshot(
+        val sizeBytes: Long,
+        val isPending: Int?
+    )
+
+    /**
+     * ✅ MediaStore 이미지가 “완전히 저장되어 읽기 가능한 상태”인지 안정화 대기
+     * - Samsung 카메라 50MP에서 간헐적으로 파일이 완전히 쓰이기 전에 복귀 Uri가 전달되는 경우가 있어
+     *   바로 openInputStream/copy/OpenCV imread 를 수행하면 장시간 block(교착)될 수 있습니다.
+     * - 이 함수는 contentResolver.query(SIZE/IS_PENDING)만 사용하므로 UI thread를 block하지 않습니다.
+     *
+     * @return true: 안정화 완료 / false: timeout 또는 token mismatch
+     */
+    private fun waitForMediaStoreImageReady(uri: Uri, token: Long, purpose: String): Boolean {
+        val start = SystemClock.elapsedRealtime()
+
+        var lastSize = -1L
+        var stableSamples = 0
+        var stableSinceElapsed = -1L
+        var sleep = MEDIA_READY_POLL_MS
+
+        val minStableMs =
+            if (GlobalParams.CAPTURE_MP >= 200) MEDIA_READY_MIN_STABLE_MS_200MP else MEDIA_READY_MIN_STABLE_MS_50MP
+
+        AirulerFileLogger.i(
+            "Measurement",
+            "waitMediaReady start purpose=$purpose token=$token uri=$uri minStableMs=$minStableMs pollMs=$MEDIA_READY_POLL_MS"
+        )
+
+        while (SystemClock.elapsedRealtime() - start < MEDIA_READY_MAX_WAIT_MS) {
+            if (state.currentSamsungCaptureToken != token) {
+                AirulerFileLogger.w("Measurement", "waitMediaReady abort(token mismatch) purpose=$purpose token=$token")
+                return false
+            }
+
+            val snap = queryMediaReadySnapshot(uri)
+            val size = snap?.sizeBytes ?: -1L
+            val pending = snap?.isPending
+            val now = SystemClock.elapsedRealtime()
+
+            val ready = (size > 0L) && (pending == null || pending == 0)
+            if (ready) {
+                if (size == lastSize) {
+                    stableSamples += 1
+                } else {
+                    stableSamples = 1
+                    stableSinceElapsed = now
+                }
+                lastSize = size
+
+                val stableForMs = if (stableSinceElapsed >= 0) (now - stableSinceElapsed) else 0L
+                if (stableSamples >= MEDIA_READY_STABLE_COUNT && stableForMs >= minStableMs) {
+                    val waited = now - start
+                    AirulerFileLogger.i(
+                        "Measurement",
+                        "waitMediaReady OK purpose=$purpose waitedMs=$waited sizeBytes=$size pending=$pending stableSamples=$stableSamples stableForMs=$stableForMs"
+                    )
+                    return true
+                }
+            } else {
+                stableSamples = 0
+                stableSinceElapsed = -1L
+                lastSize = size
+            }
+
+            SystemClock.sleep(sleep)
+            sleep = (sleep * MEDIA_READY_POLL_BACKOFF_MULT).toLong().coerceAtMost(MEDIA_READY_POLL_MAX_MS)
+        }
+
+
+        val waited = SystemClock.elapsedRealtime() - start
+        AirulerFileLogger.e(
+            "Measurement",
+            "waitMediaReady TIMEOUT purpose=$purpose waitedMs=$waited token=$token uri=$uri"
+        )
+
+        // UI/상태 복구(사용자가 Retry 가능)
+        activity.runOnUiThread {
+            // 더 최신 캡처가 시작되었으면 무시
+            if (state.currentSamsungCaptureToken != token) return@runOnUiThread
+            showToast("사진 저장이 아직 완료되지 않았습니다. 잠시 후 Retry 해주세요.")
+            appendStatus("사진 저장 지연/대기 시간 초과(> ${MEDIA_READY_MAX_WAIT_MS}ms). Retry 권장")
+            state.finishMeasuring(clearPending = false)
+            hideCapturedOverlay()
+        }
+        return false
+    }
+
+    private fun queryMediaReadySnapshot(uri: Uri): MediaReadySnapshot? {
+        val proj = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            arrayOf(
+                android.provider.MediaStore.Images.Media.SIZE,
+                android.provider.MediaStore.Images.Media.IS_PENDING
+            )
+        } else {
+            arrayOf(android.provider.MediaStore.Images.Media.SIZE)
+        }
+        return try {
+            activity.contentResolver.query(uri, proj, null, null, null)?.use { c ->
+                if (!c.moveToFirst()) return null
+                val sizeIdx = c.getColumnIndex(android.provider.MediaStore.Images.Media.SIZE)
+                val pendingIdx = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    c.getColumnIndex(android.provider.MediaStore.Images.Media.IS_PENDING)
+                } else {
+                    -1
+                }
+                val size = if (sizeIdx >= 0) c.getLong(sizeIdx) else -1L
+                val pending = if (pendingIdx >= 0) c.getInt(pendingIdx) else null
+                MediaReadySnapshot(sizeBytes = size, isPending = pending)
+            }
+        } catch (_: SecurityException) {
+            null
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun scheduleMeasureWatchdog(
+        token: Long,
+        uri: Uri,
+        capturedAtElapsedMs: Long,
+        finalizeAfterMeasure: Boolean,
+    ) {
+        // 기존 watchdog가 있다면 제거(누적 방지)
+        watchdogRunnable?.let { r -> runCatching { mainHandler.removeCallbacks(r) } }
+
+        val scheduledAt = SystemClock.elapsedRealtime()
+        val r = Runnable {
+            // 다른 캡처가 시작되었으면 무시
+            if (state.currentSamsungCaptureToken != token) return@Runnable
+            // 이미 결과가 화면에 떠 있으면 무시
+            if (state.resultShownToken == token) return@Runnable
+
+            val flags = state.snapshotMeasureFlags()
+            if (!flags.measuringNow) return@Runnable
+
+            val elapsed = SystemClock.elapsedRealtime() - capturedAtElapsedMs
+            AirulerFileLogger.e(
+                "Measurement",
+                "WATCHDOG TIMEOUT token=$token elapsedMs=$elapsed finalizeAfterMeasure=$finalizeAfterMeasure uri=$uri"
+            )
+
+            // ✅ 토큰 무효화: 진행 중이던(또는 향후 늦게 끝나는) 백그라운드 작업이
+            //    UI를 덮어쓰지 못하도록 차단
+            state.currentSamsungCaptureToken = 0L
+            state.resultShownToken = 0L
+
+            // ✅ 상태/UI 복구
+            // - pendingMeasureAfterBadBoxPass는 유지(clearPending=false)하여 사용자가 Retry로 다시 측정 가능
+            state.finishMeasuring(clearPending = false)
+
+            // GlobalParams는 Settings 값으로 복구(오버라이드가 남아 live preview에 영향 주는 것 방지)
+            GlobalParams.applyCaptureMegapixel(AppSessionSettings.captureMegapixel)
+
+            showToast("치수 분석이 오래 걸립니다(시간 초과). Retry 해주세요.")
+            appendStatus("치수 분석 시간 초과(> ${MEASURE_WATCHDOG_MS}ms). Retry 권장")
+
+            // 오버레이 닫기 + Analyzer 재개
+            hideCapturedOverlay()
+            updateMeasureButtonsForCurrentState()
+
+            // ✅ 다음 측정을 위해 executor를 재생성(교착으로 single thread가 영구 block 되는 경우 대비)
+            resetMeasureExecutor("watchdog timeout token=$token")
+
+            // (디버그) watchdog 발동 시점 기록
+            val dtFromSchedule = SystemClock.elapsedRealtime() - scheduledAt
+            AirulerFileLogger.w("Measurement", "watchdog fired. dtFromScheduleMs=$dtFromSchedule")
+        }
+
+        watchdogRunnable = r
+        mainHandler.postDelayed(r, MEASURE_WATCHDOG_MS)
+    }
 
     fun showCapturedOverlay(bmp: Bitmap, dismissOnHand: Boolean = false) {
         state.pendingLivePreviewCapture = false
@@ -123,6 +352,9 @@ class MeasurementPipeline(
     fun onSamsungCaptured(uri: Uri) {
         state.lastSamsungCapturedUri = uri
 
+        val onCapturedAt = SystemClock.elapsedRealtime()
+        AirulerFileLogger.i("Measurement", "onSamsungCaptured() uri=$uri")
+
         // ✅ Retry(재시도) 등에서 "이번 캡처 1회"만 적용되는 오버라이드(MP/Method)를 지원합니다.
         // - MeasurementPipeline이 캡처 Uri를 받는 시점에 오버라이드를 소비(consumed)하여 1회성으로 만듭니다.
         // - Capture MP는 GlobalParams의 px 기반 파라미터(200MP=2배) 및 Expert RAW 4:3→16:9 crop에 영향을 줍니다.
@@ -130,6 +362,11 @@ class MeasurementPipeline(
         val effectiveCaptureMp = mpOverride ?: AppSessionSettings.captureMegapixel
         val effectiveMethodRaw = methodOverride ?: AppSessionSettings.measurementMethod
         val effectiveMethod = if (effectiveCaptureMp >= 200) MeasurementMethod.RULER else effectiveMethodRaw
+
+        AirulerFileLogger.i(
+            "Measurement",
+            "captureOverrides mpOverride=$mpOverride methodOverride=$methodOverride | effectiveMp=$effectiveCaptureMp effectiveMethod=$effectiveMethod"
+        )
 
         // ✅ 측정 파라미터 스케일/Expert RAW crop은 GlobalParams.CAPTURE_MP 기준으로 동작하므로,
         //    실제 캡처 MP(override 포함)를 먼저 반영합니다.
@@ -150,6 +387,11 @@ class MeasurementPipeline(
         state.currentSamsungCaptureToken = token
         state.resultShownToken = 0L
 
+        AirulerFileLogger.i(
+            "Measurement",
+            "captureSession token=$token finalizeAfterMeasure=$finalizeAfterMeasure model='${model}' previewSize=${getSelectedPreviewSize()?.width}x${getSelectedPreviewSize()?.height}"
+        )
+
         // ✅ helper: 최신 캡처(token)에서만 GlobalParams를 Settings 값으로 복구
         fun restoreGlobalParamsIfCurrent() {
             if (state.currentSamsungCaptureToken == token) {
@@ -160,6 +402,15 @@ class MeasurementPipeline(
         // 1) (절전/발열 저감) 측정 대기 동안에는 캡처 이미지 디코딩/리사이즈를 하지 않고,
         //    "현재 Preview의 마지막 프레임"을 캡처해 오버레이에 고정 표시합니다.
         showSamsungCapturedLoading(token)
+
+        // ✅ 교착/무한 대기 대비 Watchdog
+        // - 결과가 일정 시간 내 표시되지 않으면 UI/상태를 복구하고 측정 executor를 재생성
+        scheduleMeasureWatchdog(
+            token = token,
+            uri = uri,
+            capturedAtElapsedMs = onCapturedAt,
+            finalizeAfterMeasure = finalizeAfterMeasure
+        )
 
         // 모델이 없으면 오버레이를 닫고 종료
         if (model.isBlank()) {
@@ -179,14 +430,30 @@ class MeasurementPipeline(
             val tw = target.width
             val th = target.height
 
-            backgroundExecutor.execute {
+            measureExecutor.execute {
                 try {
+                    // ✅ 파일이 완전히 저장되기 전에 Uri를 읽으면 블로킹/교착이 발생할 수 있어,
+                    //    MediaStore SIZE 안정화를 먼저 기다립니다.
+                    if (!waitForMediaStoreImageReady(uri, token, purpose = "GridAnalysis")) {
+                        restoreGlobalParamsIfCurrent()
+                        return@execute
+                    }
+
+                    val tProc0 = SystemClock.elapsedRealtime()
+                    AirulerFileLogger.i("Measurement", "GridAnalysis start token=$token uri=$uri")
+
                     val res = GridAnalysisProcessor.run(
                         context = activity,
                         imageUri = uri,
                         scoreThresh = GlobalParams.SCORE_THRESH,
                         iouThresh = GlobalParams.IOU_THRESH,
                         gridPitchMm = 5.0
+                    )
+
+                    val tProc1 = SystemClock.elapsedRealtime()
+                    AirulerFileLogger.i(
+                        "Measurement",
+                        "GridAnalysis done token=$token dtMs=${tProc1 - tProc0} rows=${res.rows} cols=${res.cols}"
                     )
 
                     // 다른 캡처가 시작되었다면(토큰 불일치) 이번 결과는 버림
@@ -238,6 +505,7 @@ class MeasurementPipeline(
                     }
                 } catch (e: Exception) {
                     Log.e("GridAnalysis", "Grid 분석 실패", e)
+                    AirulerFileLogger.e("Measurement", "GridAnalysis failed token=$token uri=$uri", e)
                     activity.runOnUiThread {
                         appendStatus("Grid 분석 실패: ${e.message}")
                         android.widget.Toast.makeText(activity, "Grid 분석 실패: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
@@ -261,14 +529,28 @@ class MeasurementPipeline(
         if (method == MeasurementMethod.GRID) {
             appendStatus("치수 분석 시작… (Grid 기반)")
 
-            backgroundExecutor.execute {
+            measureExecutor.execute {
                 try {
+                    if (!waitForMediaStoreImageReady(uri, token, purpose = "MeasureGrid")) {
+                        restoreGlobalParamsIfCurrent()
+                        return@execute
+                    }
+
+                    val tProc0 = SystemClock.elapsedRealtime()
+                    AirulerFileLogger.i("Measurement", "MeasureGrid start token=$token uri=$uri")
+
                     val res = FilmTotalMeasureGridProcessor.run(
                         context = activity,
                         imageUri = uri,
                         modelName = model,
                         scoreThresh = GlobalParams.SCORE_THRESH,
                         iouThresh = GlobalParams.IOU_THRESH
+                    )
+
+                    val tProc1 = SystemClock.elapsedRealtime()
+                    AirulerFileLogger.i(
+                        "Measurement",
+                        "MeasureGrid processor returned token=$token dtMs=${tProc1 - tProc0} detectedFilms=${res.detectedFilms}"
                     )
 
                     // 다른 캡처가 시작되었다면(토큰 불일치) 이번 결과는 버림
@@ -441,6 +723,7 @@ class MeasurementPipeline(
                     }
                 } catch (t: Throwable) {
                     Log.e("AIRuler", "치수 분석 실패(Grid)", t)
+                    AirulerFileLogger.e("Measurement", "MeasureGrid failed token=$token uri=$uri", t)
 
                     // ✅ 실패 원인 디버깅을 위해: '측정에 사용되는 회전 정책'으로 원본 전체 프리뷰(1280x720) 구성
                     val debugPreview = runCatching {
@@ -505,14 +788,28 @@ class MeasurementPipeline(
             // ---- 기존 Ruler 기반 측정 (변동 없음) ----
             appendStatus("치수 분석 시작… (Ruler 기반)")
 
-            backgroundExecutor.execute {
+            measureExecutor.execute {
                 try {
+                    if (!waitForMediaStoreImageReady(uri, token, purpose = "MeasureRuler")) {
+                        restoreGlobalParamsIfCurrent()
+                        return@execute
+                    }
+
+                    val tProc0 = SystemClock.elapsedRealtime()
+                    AirulerFileLogger.i("Measurement", "MeasureRuler start token=$token uri=$uri")
+
                     val res = FilmTotalMeasureProcessor.run(
                         context = activity,
                         imageUri = uri,
                         modelName = model,
                         scoreThresh = GlobalParams.SCORE_THRESH,
                         iouThresh = GlobalParams.IOU_THRESH
+                    )
+
+                    val tProc1 = SystemClock.elapsedRealtime()
+                    AirulerFileLogger.i(
+                        "Measurement",
+                        "MeasureRuler processor returned token=$token dtMs=${tProc1 - tProc0} films=${res.detectedFilms}"
                     )
 
                     // 다른 캡처가 시작되었다면(토큰 불일치) 이번 결과는 버림
@@ -682,6 +979,7 @@ class MeasurementPipeline(
                     }
                 } catch (t: Throwable) {
                     Log.e("AIRuler", "치수 분석 실패", t)
+                    AirulerFileLogger.e("Measurement", "MeasureRuler failed token=$token uri=$uri", t)
 
                     // ✅ 실패 원인 디버깅을 위해: '측정에 사용되는 회전 정책'으로 원본 전체 프리뷰(1280x720) 구성
                     val debugPreview = runCatching {

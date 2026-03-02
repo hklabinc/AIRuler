@@ -329,6 +329,7 @@ class MainActivity : AppCompatActivity() {
 
         // 파이프라인 자원
         runCatching { inferencePipeline.release() }
+        runCatching { measurementPipeline.shutdown() }
 
         // Sound
         runCatching { soundPlayer.release() }

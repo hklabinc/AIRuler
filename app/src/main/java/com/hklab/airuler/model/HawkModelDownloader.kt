@@ -198,7 +198,7 @@ object HawkModelDownloader {
         val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 10_000
-            readTimeout = 60_000
+            readTimeout = 30_000
             doInput = true
             instanceFollowRedirects = true
         }

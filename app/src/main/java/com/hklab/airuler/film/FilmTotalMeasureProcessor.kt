@@ -33,6 +33,7 @@ import java.util.Locale
 import com.hklab.airuler.GlobalParams
 import com.hklab.airuler.calibration.GridOnlineOffsetCalibrationStore
 import com.hklab.airuler.pipeline.state.AppSessionSettings
+import com.hklab.airuler.log.AirulerFileLogger
 
 /**
  * Python(HkRuler) `on_run_film_total_measure_ruler()` 파이프라인을 AIRuler에 이식한 프로세서.
@@ -1474,20 +1475,35 @@ object FilmTotalMeasureProcessor {
         uri: Uri,
         forceLandscape: Boolean = true
     ): Mat {
+        val t0 = SystemClock.elapsedRealtime()
+        AirulerFileLogger.i(TAG, "loadBgrMatFromUri start uri=$uri")
         val tmp = File.createTempFile("airuler_capture_", ".jpg", context.cacheDir)
 
+        val tCopy0 = SystemClock.elapsedRealtime()
         context.contentResolver.openInputStream(uri)?.use { input ->
             FileOutputStream(tmp).use { out ->
                 input.copyTo(out)
             }
         } ?: throw IllegalStateException("Cannot open uri: $uri")
 
+        val tCopy1 = SystemClock.elapsedRealtime()
+        val copiedBytes = runCatching { tmp.length() }.getOrDefault(-1L)
+        AirulerFileLogger.i(TAG, "loadBgrMatFromUri copy done dtMs=${tCopy1 - tCopy0} bytes=$copiedBytes")
+
         try {
             // ✅ OpenCV imread가 EXIF를 자동 적용하는 빌드가 있어, 가능하면 무시 플래그를 켠다.
             val ignoreOriFlag = IMREAD_IGNORE_ORIENTATION_FLAG
             val flags = Imgcodecs.IMREAD_COLOR or ignoreOriFlag
+
+            val tRead0 = SystemClock.elapsedRealtime()
             var img = Imgcodecs.imread(tmp.absolutePath, flags)
+            val tRead1 = SystemClock.elapsedRealtime()
             if (img.empty()) throw IllegalStateException("OpenCV imread failed: $uri")
+
+            AirulerFileLogger.i(
+                TAG,
+                "loadBgrMatFromUri imread done dtMs=${tRead1 - tRead0} size=${img.cols()}x${img.rows()} totalMs=${tRead1 - t0}"
+            )
 
             val rawW = img.cols()
             val rawH = img.rows()

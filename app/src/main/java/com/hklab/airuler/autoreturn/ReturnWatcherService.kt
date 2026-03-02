@@ -14,6 +14,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.MediaStore
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -36,6 +37,14 @@ class ReturnWatcherService : Service() {
         // ✅ Expert RAW 저장 지연 대응(파일이 완전히 써질 때까지 size 안정화 대기)
         private const val EXPERT_RAW_POLL_INTERVAL_MS = 350L
         private const val EXPERT_RAW_STABLE_COUNT = 2
+
+        // ✅ Samsung Camera(50MP)도 저장/후처리 지연이 발생할 수 있어 안정화 대기
+        // - (증상) 복귀 직후 바로 Uri를 읽으면 content stream이 block 되거나
+        //         OpenCV imread 단계에서 “끝나지 않는 대기”가 발생할 수 있음
+        // - 안정화 기준: SIZE가 연속으로 동일(>=2회) + IS_PENDING==0
+        private const val SAMSUNG_POLL_INTERVAL_MS = 250L
+        private const val SAMSUNG_STABLE_COUNT = 2
+        private const val SAMSUNG_POLL_MAX_MS = 25_000L
     }
 
     private val main by lazy { Handler(Looper.getMainLooper()) }
@@ -51,6 +60,13 @@ class ReturnWatcherService : Service() {
     private var expertCandidateLastSize: Long = -1L
     private var expertCandidateStableCount: Int = 0
 
+    // Samsung Camera polling state
+    private var samsungPollRunning = false
+    private var samsungPollStartElapsedMs: Long = 0L
+    private var samsungCandidateUri: Uri? = null
+    private var samsungCandidateLastSize: Long = -1L
+    private var samsungCandidateStableCount: Int = 0
+
     private val expertRawPollRunnable = object : Runnable {
         override fun run() {
             if (handled || !expertRawPollRunning) return
@@ -62,6 +78,45 @@ class ReturnWatcherService : Service() {
             }
 
             main.postDelayed(this, EXPERT_RAW_POLL_INTERVAL_MS)
+        }
+    }
+
+    private val samsungPollRunnable = object : Runnable {
+        override fun run() {
+            if (handled || !samsungPollRunning) return
+
+            val latest = findLatestNewSamsungJpegUri() ?: samsungCandidateUri
+
+            // (1) 안정화 확인
+            if (latest != null && isSamsungUriStable(latest)) {
+                onDetected(latest)
+                return
+            }
+
+            // (2) 너무 오래 끌면(사용자 입장에서는 이미 앱으로 돌아와 “로딩 화면”만 보이는 상태)
+            //     더 이상 서비스에서 대기하지 않고, 가장 최근 후보 Uri를 넘겨
+            //     MeasurementPipeline의 내부 대기 로직에 맡깁니다.
+            val waited = SystemClock.elapsedRealtime() - samsungPollStartElapsedMs
+            if (waited > SAMSUNG_POLL_MAX_MS) {
+                if (latest != null) {
+                    AirulerFileLogger.w(
+                        "ReturnWatcher",
+                        "Samsung polling timeout (${waited}ms). Proceed without stable-check. uri=$latest"
+                    )
+                    onDetected(latest)
+                    return
+                }
+
+                // 촬영이 취소/실패하여 후보 Uri가 끝내 잡히지 않는 경우: 서비스가 무한정 남지 않게 종료
+                AirulerFileLogger.w(
+                    "ReturnWatcher",
+                    "Samsung polling timeout (${waited}ms) but no candidate uri. Stop watcher."
+                )
+                cleanupAndStop()
+                return
+            }
+
+            main.postDelayed(this, SAMSUNG_POLL_INTERVAL_MS)
         }
     }
 
@@ -158,14 +213,18 @@ class ReturnWatcherService : Service() {
                     }
 
                     else -> {
-                        // 삼성 카메라(기존 동작) : 단건 uri 빠른 판정 → 폴백 재조회
-                        if (uri != null && isNewSamsungJpegUri(uri)) {
-                            onDetected(uri)
-                            return
+                        // ✅ Samsung Camera(50MP):
+                        //    여기(ReturnWatcher)에서는 “가능한 빨리 앱으로 복귀”시키고,
+                        //    실제 파일 안정화/대기는 MeasurementPipeline.waitMediaReady()에서 처리합니다.
+                        //    (중복 안정화 대기를 피해서 전체 지연 시간을 줄이기 위함)
+                        val candidate = when {
+                            uri != null && isNewSamsungJpegUri(uri) -> uri
+                            else -> findLatestNewSamsungJpegUri()
                         }
 
-                        val latest = findLatestNewSamsungJpegUri()
-                        if (latest != null) onDetected(latest)
+                        if (candidate != null) {
+                            onDetected(candidate)
+                        }
                     }
                 }
             }
@@ -186,6 +245,40 @@ class ReturnWatcherService : Service() {
         expertCandidateLastSize = -1L
         expertCandidateStableCount = 0
         main.post(expertRawPollRunnable)
+    }
+
+    // ---------------- Samsung Camera ----------------
+    private fun startSamsungPollingIfNeeded() {
+        if (samsungPollRunning) return
+        samsungPollRunning = true
+        samsungPollStartElapsedMs = SystemClock.elapsedRealtime()
+        samsungCandidateLastSize = -1L
+        samsungCandidateStableCount = 0
+        main.post(samsungPollRunnable)
+    }
+
+    private fun isSamsungUriStable(uri: Uri): Boolean {
+        val sz = querySizeIfReady(uri) ?: return false
+        if (sz <= 0L) return false
+
+        val key = uri.toString()
+        val lastKey = samsungCandidateUri?.toString()
+
+        if (lastKey != key) {
+            samsungCandidateUri = uri
+            samsungCandidateLastSize = sz
+            samsungCandidateStableCount = 0
+            return false
+        }
+
+        if (sz == samsungCandidateLastSize) {
+            samsungCandidateStableCount++
+        } else {
+            samsungCandidateLastSize = sz
+            samsungCandidateStableCount = 0
+        }
+
+        return samsungCandidateStableCount >= SAMSUNG_STABLE_COUNT
     }
 
     private fun isExpertRawUriStable(uri: Uri): Boolean {
@@ -467,6 +560,9 @@ class ReturnWatcherService : Service() {
         expertRawPollRunning = false
         runCatching { main.removeCallbacks(expertRawPollRunnable) }
 
+        samsungPollRunning = false
+        runCatching { main.removeCallbacks(samsungPollRunnable) }
+
         // 옵저버 해제
         mediaObserver?.let { contentResolver.unregisterContentObserver(it) }
         mediaObserver = null
@@ -554,5 +650,8 @@ class ReturnWatcherService : Service() {
 
         expertRawPollRunning = false
         runCatching { main.removeCallbacks(expertRawPollRunnable) }
+
+        samsungPollRunning = false
+        runCatching { main.removeCallbacks(samsungPollRunnable) }
     }
 }
