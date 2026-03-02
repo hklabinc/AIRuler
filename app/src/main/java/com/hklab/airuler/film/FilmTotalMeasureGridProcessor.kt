@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.SystemClock
 import android.util.Log
+import com.hklab.airuler.log.AirulerFileLogger
 import com.hklab.airuler.film.ruler.PyMath
 import com.hklab.airuler.grid.GridWarpCache
 import com.hklab.airuler.grid.GridWarpPiecewiseAffine
@@ -16,13 +17,14 @@ import org.opencv.android.Utils
 import org.opencv.core.Core
 import org.opencv.core.CvType
 import org.opencv.core.Mat
-import org.opencv.core.MatOfByte
 import org.opencv.core.Point
 import org.opencv.core.Rect
 import org.opencv.core.Scalar
 import org.opencv.core.Size
 import org.opencv.imgcodecs.Imgcodecs
 import org.opencv.imgproc.Imgproc
+import java.io.File
+import java.io.FileOutputStream
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.hypot
@@ -43,6 +45,14 @@ import com.hklab.airuler.pipeline.state.AppSessionSettings
 object FilmTotalMeasureGridProcessor {
 
     private const val TAG = "FilmTotalMeasureGrid"
+
+    // ✅ (성능) OpenCV 상수 reflection(필드 조회)은 1회만 수행
+    // - Grid 측정에서도 대용량 이미지 로딩이 반복되므로, 매번 reflection을 하면 불필요한 오버헤드가 됩니다.
+    private val IMREAD_IGNORE_ORIENTATION_FLAG: Int by lazy {
+        runCatching {
+            Imgcodecs::class.java.getField("IMREAD_IGNORE_ORIENTATION").getInt(null)
+        }.getOrDefault(0)
+    }
 
     // NEW(curve_points): curve_points ROI 지원 (Python: main_ruler_selected_2points_GUI_v17.py)
     private const val CURVE_TARGET_Y_MM_DEFAULT = 10.0
@@ -166,18 +176,24 @@ object FilmTotalMeasureGridProcessor {
             val yoloBmp = createYoloInputBitmapFromBgr(img, targetW = inW, targetH = inH)
                 ?: throw IllegalStateException("Failed to build yolo input bitmap")
 
-            val dets = yolo.detect(
-                bitmap = yoloBmp,
-                scoreThresh = scoreThresh,
-                iouThresh = iouThresh
-            )
+            val dets = try {
+                yolo.detect(
+                    bitmap = yoloBmp,
+                    scoreThresh = scoreThresh,
+                    iouThresh = iouThresh
+                )
+            } finally {
+                // ✅ Interpreter는 명시적으로 해제(장시간 사용 시 메모리 누수/GC 스파이크 방지)
+                runCatching { yolo.close() }
+                // ✅ 예외가 나더라도 입력 Bitmap은 반드시 정리
+                runCatching { yoloBmp.recycle() }
+            }
 
             // (2026-02) YOLO 모델이 good/bad도 함께 출력할 수 있으므로,
             // "필름 ROI"로 사용할 detection은 film/flim class만 필터링합니다.
             val filmDets = AirulerYoloClasses.filterFilms(dets)
 
-            // ✅ YOLO 입력 Bitmap은 더 이상 필요 없으므로 정리(메모리)
-            runCatching { yoloBmp.recycle() }
+            // ✅ YOLO 입력 Bitmap은 detect() finally에서 정리됨
 
             if (filmDets.isEmpty()) {
                 logs.add("[Grid 기반 필름 전체 길이 측정] 필름 ROI 검출 실패 (FAIL)")
@@ -812,30 +828,67 @@ object FilmTotalMeasureGridProcessor {
      * Samsung 원본 이미지 처리 정책:
      * - "세로가 가로보다 긴" 경우에는 EXIF 대신 무조건 CCW 90 회전하여 landscape 로 맞춥니다.
      */
+    /**
+     * ✅ Grid 측정용 이미지 로딩
+     *
+     * 기존 구현은 openInputStream(uri).readBytes() → imdecode(MatOfByte) 방식이었는데,
+     * - 대용량 이미지에서 ByteArray/MatOfByte 메모리 복사/할당이 커지고
+     * - GC/메모리 압박으로 측정 시간이 늘거나(드물게) 교착으로 보이는 현상이 발생할 수 있어
+     * FilmTotalMeasureProcessor와 동일하게 "temp file → OpenCV imread" 방식으로 통일합니다.
+     *
+     * 동작/로직은 동일(최종 Mat는 BGR)하며,
+     * - (가능하면) EXIF 자동 회전은 무시
+     * - portrait(h>w)인 경우에만 90° CCW 회전으로 landscape 정규화
+     */
     private fun loadBgrMatFromUri(context: Context, uri: Uri, forceLandscape: Boolean): Mat {
-        val input = context.contentResolver.openInputStream(uri)
-            ?: throw IllegalStateException("cannot open: $uri")
+        val t0 = SystemClock.elapsedRealtime()
+        val tmp = File.createTempFile("airuler_capture_grid_", ".jpg", context.cacheDir)
 
-        val bytes = input.use { it.readBytes() }
-        val mob = MatOfByte(*bytes)
+        try {
+            val tCopy0 = SystemClock.elapsedRealtime()
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                FileOutputStream(tmp).use { out ->
+                    // ✅ (성능) 기본 copyTo(8KB) 대신 큰 버퍼로 복사
+                    val buffer = ByteArray(1024 * 1024)
+                    var total = 0L
+                    while (true) {
+                        val n = input.read(buffer)
+                        if (n <= 0) break
+                        out.write(buffer, 0, n)
+                        total += n
+                    }
+                    out.flush()
 
-        val img = Imgcodecs.imdecode(mob, Imgcodecs.IMREAD_COLOR)
-        mob.release()
+                    val tCopy1 = SystemClock.elapsedRealtime()
+                    AirulerFileLogger.d(TAG, "loadBgrMatFromUri copy done dtMs=${tCopy1 - tCopy0} bytes=$total")
+                }
+            } ?: throw IllegalStateException("cannot open: $uri")
 
-        if (img.empty()) return img
+            val ignoreOriFlag = IMREAD_IGNORE_ORIENTATION_FLAG
+            val flags = Imgcodecs.IMREAD_COLOR or ignoreOriFlag
 
-        if (forceLandscape) {
-            val H = img.rows()
-            val W = img.cols()
-            if (H > W) {
+            val tRead0 = SystemClock.elapsedRealtime()
+            var img = Imgcodecs.imread(tmp.absolutePath, flags)
+            val tRead1 = SystemClock.elapsedRealtime()
+
+            if (img.empty()) return img
+            AirulerFileLogger.d(
+                TAG,
+                "loadBgrMatFromUri imread done dtMs=${tRead1 - tRead0} size=${img.cols()}x${img.rows()} totalMs=${tRead1 - t0}"
+            )
+
+            if (forceLandscape && img.rows() > img.cols()) {
                 val rotated = Mat()
                 Core.rotate(img, rotated, Core.ROTATE_90_COUNTERCLOCKWISE)
                 img.release()
-                return rotated
+                img = rotated
             }
-        }
 
-        return img
+            return img
+        } finally {
+            // ✅ cacheDir temp 파일 누적 방지
+            runCatching { tmp.delete() }
+        }
     }
 
 

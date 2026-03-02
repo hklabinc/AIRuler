@@ -1482,7 +1482,9 @@ object FilmTotalMeasureProcessor {
         val tCopy0 = SystemClock.elapsedRealtime()
         context.contentResolver.openInputStream(uri)?.use { input ->
             FileOutputStream(tmp).use { out ->
-                input.copyTo(out)
+                // ✅ (성능) 기본 copyTo(8KB) 대신 큰 버퍼로 복사
+                input.copyTo(out, bufferSize = 1024 * 1024)
+                out.flush()
             }
         } ?: throw IllegalStateException("Cannot open uri: $uri")
 
