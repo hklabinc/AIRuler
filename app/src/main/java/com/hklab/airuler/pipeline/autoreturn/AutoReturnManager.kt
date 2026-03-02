@@ -35,7 +35,11 @@ class AutoReturnManager(
      * 동일 Uri가 여러 번 전달될 수 있습니다.
      * 중복 분석/깜빡임 방지를 위해 1회만 처리합니다.
      */
-    private fun shouldHandleSamsungCapturedUri(uri: Uri, windowMs: Long = 60_000L): Boolean {
+    // NOTE:
+    // - 중복 Uri는 보통 bring-to-front 재시도(수백 ms~수 초) 구간에만 발생합니다.
+    // - windowMs를 너무 길게 잡을 필요는 없고(정상 경로 시간 단축에는 영향 없음),
+    //   오히려 너무 길면 “같은 Uri 재처리”가 필요한 특이 케이스에서 막힐 수 있습니다.
+    private fun shouldHandleSamsungCapturedUri(uri: Uri, windowMs: Long = 8_000L): Boolean {
         val key = uri.toString()
         val now = SystemClock.elapsedRealtime()
 

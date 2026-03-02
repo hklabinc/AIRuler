@@ -27,6 +27,7 @@ import com.hklab.airuler.autoreturn.ReturnWatcherService
 import com.hklab.airuler.databinding.ActivityMainBinding
 import com.hklab.airuler.gallery.AirulerGalleryFoldersActivity
 import com.hklab.airuler.film.FilmModelConfigLoader
+import com.hklab.airuler.film.FilmTotalMeasureGridProcessor
 import com.hklab.airuler.model.ModelSelectActivity
 import com.hklab.airuler.model.ModelFileStore
 import com.hklab.airuler.model.HawkModelDownloader
@@ -263,6 +264,18 @@ class MainActivity : AppCompatActivity() {
         
         initUi()
 
+        // ✅ (성능) 첫 측정에서 dt가 튀는 현상(모델 init/warm-up)을 줄이기 위해
+        //    백그라운드에서 1회 warm-up을 수행합니다.
+        // - 실패해도 앱 동작에 영향이 없어야 하므로 runCatching으로 감쌉니다.
+        runCatching {
+            val model = selectedModelName ?: ModelStore.get(this)
+            if (AppSessionSettings.captureMegapixel < 200 && AppSessionSettings.measurementMethod == MeasurementMethod.GRID) {
+                backgroundExecutor.execute {
+                    FilmTotalMeasureGridProcessor.prewarm(applicationContext, model)
+                }
+            }
+        }
+
         updatePreviewPauseUi()
         requestPermissionsIfNeeded()
 
@@ -281,6 +294,15 @@ class MainActivity : AppCompatActivity() {
             ModelStore.save(this, newModel)
             updatePreviewPauseUi()
             inferencePipeline.onModelChanged()
+
+            // ✅ 모델 변경 시에도 warm-up(첫 촬영 지연 완화)
+            runCatching {
+                if (AppSessionSettings.captureMegapixel < 200 && AppSessionSettings.measurementMethod == MeasurementMethod.GRID) {
+                    backgroundExecutor.execute {
+                        FilmTotalMeasureGridProcessor.prewarm(applicationContext, newModel)
+                    }
+                }
+            }
         }
 
         // 2) Samsung 캡처 복귀 처리
@@ -330,6 +352,9 @@ class MainActivity : AppCompatActivity() {
         // 파이프라인 자원
         runCatching { inferencePipeline.release() }
         runCatching { measurementPipeline.shutdown() }
+
+        // ✅ (선택) cached Yolo/warp 리소스 정리
+        runCatching { FilmTotalMeasureGridProcessor.releaseCachedResources() }
 
         // Sound
         runCatching { soundPlayer.release() }

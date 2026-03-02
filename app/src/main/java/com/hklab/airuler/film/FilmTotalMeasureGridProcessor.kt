@@ -46,6 +46,83 @@ object FilmTotalMeasureGridProcessor {
 
     private const val TAG = "FilmTotalMeasureGrid"
 
+    // ✅ (성능) Grid 측정은 “촬영→복귀→측정” 흐름에서 연속 호출될 수 있습니다.
+    // 매 run마다 YoloDetector(=TFLite Interpreter)를 생성/close 하면
+    //  - 모델 로딩/Interpreter 초기화 비용
+    //  - detect() 내부 reusable buffer 재할당
+    // 이 반복되어 첫 run이 특히 느려지고, GC 압박도 증가합니다.
+    //
+    // 측정은 MeasurementPipeline의 단일 스레드(executor)에서 순차 실행되는 구조이므로,
+    // 여기서는 “단일 인스턴스 캐시”가 안전하고 효과적입니다.
+    private val yoloCacheLock = Any()
+    @Volatile private var cachedYolo: YoloDetector? = null
+    @Volatile private var cachedYoloKey: String? = null
+
+    private fun getOrCreateYolo(context: Context, modelPath: String): YoloDetector {
+        val key = "$modelPath|threads=4|labels=film,good,bad"
+        synchronized(yoloCacheLock) {
+            val cur = cachedYolo
+            if (cur != null && cachedYoloKey == key) return cur
+
+            // 모델이 바뀌었거나, 캐시가 없다면 교체
+            runCatching { cur?.close() }
+
+            val y = YoloDetector(
+                context.applicationContext,
+                modelPath,
+                4,
+                classLabels = arrayOf("film", "good", "bad")
+            )
+            cachedYolo = y
+            cachedYoloKey = key
+            return y
+        }
+    }
+
+    /**
+     * ✅ (성능) 1회 warm-up
+     * - 첫 측정에서 tflite init/JIT/페이지 로드로 인해 dt가 튀는 현상을 줄이기 위함
+     * - 결과/로직에는 영향을 주지 않으며, 실패해도 앱 동작에 영향이 없어야 합니다.
+     */
+    fun prewarm(context: Context, modelName: String) {
+        val appCtx = context.applicationContext
+        runCatching {
+            val t0 = SystemClock.elapsedRealtime()
+
+            // Grid warp도 미리 로드(없어도 실패로 치지 않음)
+            runCatching { GridWarpCache.getOrLoad(appCtx) }
+
+            val baseModel = modelName.trim().substringBefore("_FO")
+            val tfliteFile = ModelFileStore.downloadedModelFile(appCtx, baseModel)
+            if (!tfliteFile.exists()) return
+
+            val yolo = getOrCreateYolo(appCtx, tfliteFile.absolutePath)
+            val (inW, inH) = yolo.inputSizeWh()
+
+            val dummy = Bitmap.createBitmap(inW, inH, Bitmap.Config.ARGB_8888)
+            try {
+                // 높은 threshold로 후보를 최소화(의미 없는 warmup이지만 런타임 초기화는 유도)
+                yolo.detect(dummy, scoreThresh = 0.99f, iouThresh = 0.5f)
+            } finally {
+                runCatching { dummy.recycle() }
+            }
+
+            val t1 = SystemClock.elapsedRealtime()
+            AirulerFileLogger.i(TAG, "prewarm done model='$baseModel' dtMs=${t1 - t0} yoloIn=${inW}x${inH}")
+        }.onFailure { e ->
+            AirulerFileLogger.w(TAG, "prewarm skipped: ${e.javaClass.simpleName}:${e.message}")
+        }
+    }
+
+    /** 앱 종료/파이프라인 해제 시 캐시 정리(선택) */
+    fun releaseCachedResources() {
+        synchronized(yoloCacheLock) {
+            runCatching { cachedYolo?.close() }
+            cachedYolo = null
+            cachedYoloKey = null
+        }
+    }
+
     // ✅ (성능) OpenCV 상수 reflection(필드 조회)은 1회만 수행
     // - Grid 측정에서도 대용량 이미지 로딩이 반복되므로, 매번 reflection을 하면 불필요한 오버헤드가 됩니다.
     private val IMREAD_IGNORE_ORIENTATION_FLAG: Int by lazy {
@@ -170,24 +247,36 @@ object FilmTotalMeasureGridProcessor {
             logs.add(String.format(Locale.US, "[Grid 기반 필름 전체 길이 측정] image=%dx%d", W, H))
 
             // 4) YOLO(필름 ROI) 검출
-            val yolo = YoloDetector(context, tfliteFile.absolutePath, 4, classLabels = arrayOf("film", "good", "bad"))
+            val tYolo0 = SystemClock.elapsedRealtime()
+            val yolo = getOrCreateYolo(context, tfliteFile.absolutePath)
             val (inW, inH) = yolo.inputSizeWh()
+            val tYolo1 = SystemClock.elapsedRealtime()
 
             val yoloBmp = createYoloInputBitmapFromBgr(img, targetW = inW, targetH = inH)
                 ?: throw IllegalStateException("Failed to build yolo input bitmap")
 
+            val tYolo2 = SystemClock.elapsedRealtime()
             val dets = try {
                 yolo.detect(
                     bitmap = yoloBmp,
                     scoreThresh = scoreThresh,
                     iouThresh = iouThresh
                 )
+            } catch (e: Throwable) {
+                // ✅ 드물게 TFLite 내부 오류/상태 꼬임이 발생하면 캐시를 버리고 재생성하도록 유도
+                AirulerFileLogger.e(TAG, "yolo.detect failed -> drop cache", e)
+                releaseCachedResources()
+                throw e
             } finally {
-                // ✅ Interpreter는 명시적으로 해제(장시간 사용 시 메모리 누수/GC 스파이크 방지)
-                runCatching { yolo.close() }
                 // ✅ 예외가 나더라도 입력 Bitmap은 반드시 정리
                 runCatching { yoloBmp.recycle() }
             }
+
+            val tYolo3 = SystemClock.elapsedRealtime()
+            AirulerFileLogger.d(
+                TAG,
+                "yolo stage dtMs getOrCreate=${tYolo1 - tYolo0} buildBmp=${tYolo2 - tYolo1} detect=${tYolo3 - tYolo2}"
+            )
 
             // (2026-02) YOLO 모델이 good/bad도 함께 출력할 수 있으므로,
             // "필름 ROI"로 사용할 detection은 film/flim class만 필터링합니다.
