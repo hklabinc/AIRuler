@@ -147,9 +147,10 @@ class AutoReturnManager(
             // Store는 항상 정리(중복/잔재 방지)
             SamsungCaptureStore.clear(activity)
 
-            AirulerFileLogger.i("AutoReturn", "consumePendingSamsungCapture(intent) uri=$uriFromIntent")
-
+            // ✅ 중복이면 shouldHandle에서 warning 로그가 남으므로,
+            //    여기서는 "실제로 처리할 때"만 info 로그를 남깁니다.
             if (shouldHandleSamsungCapturedUri(uriFromIntent)) {
+                AirulerFileLogger.i("AutoReturn", "consumePendingSamsungCapture(intent) uri=$uriFromIntent")
                 onCaptured(uriFromIntent)
             }
             return
@@ -158,8 +159,8 @@ class AutoReturnManager(
         // 2) 폴백: Store에 저장된 Uri 소비
         val uriFromStore = SamsungCaptureStore.consume(activity)
         if (uriFromStore != null) {
-            AirulerFileLogger.i("AutoReturn", "consumePendingSamsungCapture(store) uri=$uriFromStore")
             if (shouldHandleSamsungCapturedUri(uriFromStore)) {
+                AirulerFileLogger.i("AutoReturn", "consumePendingSamsungCapture(store) uri=$uriFromStore")
                 onCaptured(uriFromStore)
             }
         }

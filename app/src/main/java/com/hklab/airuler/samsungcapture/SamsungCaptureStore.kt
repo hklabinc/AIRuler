@@ -22,6 +22,23 @@ object SamsungCaptureStore {
         return runCatching { Uri.parse(s) }.getOrNull()
     }
 
+    /**
+     * 삭제하지 않고 현재 pending uri를 조회합니다.
+     *
+     * - ReturnWatcher/Accessibility 쪽에서 "이미 Activity가 capture를 소비했는지" 확인하는 용도.
+     * - consume()와 달리 값을 유지하므로, 재시도 로직의 안정성을 해치지 않습니다.
+     */
+    fun peek(context: Context): Uri? {
+        val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+        val s = prefs.getString(KEY_PENDING_URI, null) ?: return null
+        return runCatching { Uri.parse(s) }.getOrNull()
+    }
+
+    fun hasPending(context: Context): Boolean {
+        return context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+            .contains(KEY_PENDING_URI)
+    }
+
     fun clear(context: Context) {
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
             .edit()

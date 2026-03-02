@@ -10,6 +10,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityManager
 import com.hklab.airuler.MainActivity
 import com.hklab.airuler.samsungcapture.SamsungCaptureContract
+import com.hklab.airuler.samsungcapture.SamsungCaptureStore
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 
@@ -147,7 +148,11 @@ class ReturnAccessibilityService : AccessibilityService() {
 
         // 전환 안정화를 위해 여러 번 재시도
         longArrayOf(150L, 300L, 600L).forEach { delay ->
-            main.postDelayed({ startActivity(intent) }, delay)
+            main.postDelayed({
+                // ✅ 이미 Activity가 Uri를 소비(=Store가 비었음)했으면 더 이상의 재시도는 불필요합니다.
+                if (SamsungCaptureStore.peek(this) == null) return@postDelayed
+                startActivity(intent)
+            }, delay)
         }
     }
 }
