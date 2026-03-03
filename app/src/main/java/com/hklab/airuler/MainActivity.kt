@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Size
+import android.view.KeyEvent
 import android.view.Surface
 import android.view.View
 import androidx.activity.OnBackPressedCallback
@@ -282,6 +283,35 @@ class MainActivity : AppCompatActivity() {
 
         // 인텐트로 들어온 Samsung 캡처 URI 처리
         autoReturnManager.consumePendingSamsungCapture(intent)
+    }
+
+    /**
+     * ✅ (요구사항)
+     * activity_main(MainActivity) 화면에서는 외부 키보드 입력으로 인해
+     * 측정이 멈추거나 다른 화면으로 이동하는 문제를 방지하기 위해,
+     * "외부 입력 장치(블루투스/USB 키보드 등)"에서 들어오는 KeyEvent를 모두 무시합니다.
+     *
+     * - MainActivity에만 적용됩니다. (다른 화면은 기존대로 키보드 입력 가능)
+     * - 터치/마우스 입력(MotionEvent)은 영향을 받지 않습니다.
+     * - 기기 자체(내장) 버튼에서 오는 이벤트는 최소한으로 영향 주기 위해 차단하지 않습니다.
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (shouldIgnoreExternalKeyEvent(event)) return true
+        return super.dispatchKeyEvent(event)
+    }
+
+    /**
+     * Ctrl+조합 등 "키보드 숏컷" 이벤트도 동일하게 차단합니다.
+     */
+    override fun dispatchKeyShortcutEvent(event: KeyEvent): Boolean {
+        if (shouldIgnoreExternalKeyEvent(event)) return true
+        return super.dispatchKeyShortcutEvent(event)
+    }
+
+    private fun shouldIgnoreExternalKeyEvent(event: KeyEvent): Boolean {
+        // 외부 키보드/리모컨 등에서 들어오는 키 이벤트만 차단 (내장 버튼/시스템 제스처 영향 최소화)
+        val device = event.device ?: return false
+        return device.isExternal
     }
 
     override fun onNewIntent(intent: Intent?) {

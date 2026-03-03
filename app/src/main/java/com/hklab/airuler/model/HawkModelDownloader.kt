@@ -55,9 +55,16 @@ object HawkModelDownloader {
         val latestFolder = findLatestRunFolderStrict(projectName = projectName, size = "nano")
             ?: throw IllegalStateException("서버에 run 폴더가 없습니다: ${projectName}_nano_YYYYMMDD_HHMMSS")
 
-        val tfliteUrl = "${baseRunsUrl()}/$latestFolder/weights/best_saved_model/best_float16.tflite"
+        // ✅ 요구사항 변경:
+        // - (구) /weights/best_saved_model/best_float16.tflite
+        // - (신) /export/best_float16.tflite (파일명 고정)
+        //   ※ 폴더 listing 파싱/HEAD 체크 등 추가 처리 없이 URL을 고정합니다.
+        val tfliteUrl = "${baseRunsUrl()}/$latestFolder/export/best_float16.tflite"
 
-        val tfliteDst = ModelFileStore.downloadedModelFile(context, baseModel)
+        // ✅ 저장 파일명 요구사항: 모델명_모델사이즈_날짜_시간.tflite
+        // - latestFolder 자체가 "{projectName}_{size}_YYYYMMDD_HHMMSS" 이므로
+        //   로컬 저장은 "{latestFolder}.tflite" 로 고정
+        val tfliteDst = ModelFileStore.runTfliteFile(context, latestFolder)
         val tfliteTmp = File(tfliteDst.parentFile, tfliteDst.name + ".tmp")
 
         // 0~85% : tflite
@@ -131,6 +138,19 @@ object HawkModelDownloader {
 
         // atomic replace (tflite)
         atomicReplace(tfliteTmp, tfliteDst)
+
+        // ✅ 최신 다운로드 후, 같은 모델의 구버전 tflite 자동 정리(1개만 유지)
+        // - 정리 실패가 다운로드 자체를 실패시키면 안 되므로 예외는 삼킵니다.
+        runCatching {
+            ModelFileStore.pruneOldModelTflites(context, baseModel, keepFile = tfliteDst)
+        }.onFailure { e ->
+            Log.w(
+                "HawkModelDownloader",
+                "Old tflite cleanup failed (model=$baseModel): ${e.javaClass.simpleName}: ${e.message}",
+                e
+            )
+        }
+
         onProgress(100)
         tfliteDst
     }
