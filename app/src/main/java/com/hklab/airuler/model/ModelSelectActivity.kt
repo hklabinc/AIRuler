@@ -5,6 +5,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.SurfaceTexture
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -13,29 +16,47 @@ import android.os.Handler
 import android.os.Looper
 import android.util.DisplayMetrics
 import android.util.Log
+import android.util.Size
 import android.view.View
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.GridLayoutManager
 import com.hklab.airuler.GlobalParams
 import com.hklab.airuler.MainActivity
+import com.hklab.airuler.SettingsActivity
 import com.hklab.airuler.calibration.GridOnlineOffsetCalibrationStore
 import com.hklab.airuler.databinding.ActivityModelSelectBinding
 import com.hklab.airuler.log.AirulerFileLogger
+import com.hklab.airuler.pipeline.MeasureMode
+import com.hklab.airuler.pipeline.MeasurementMethod
+import com.hklab.airuler.pipeline.TiltMode
+import com.hklab.airuler.pipeline.state.AppSessionSettings
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.math.abs
 import kotlin.math.max
 
 class ModelSelectActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityModelSelectBinding
     private lateinit var adapter: ModelSelectAdapter
+
+    // ===== Settings (open from ModelSelect) =====
+
+    private val settingsLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != RESULT_OK) return@registerForActivityResult
+        val data = result.data ?: return@registerForActivityResult
+        applySettingsFromResult(data)
+    }
 
     // ===== SW Update (APK) download =====
     private companion object {
@@ -121,12 +142,17 @@ class ModelSelectActivity : AppCompatActivity() {
         binding = ActivityModelSelectBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // ✅ 요청사항: 상단 타이틀에는 버전 표기를 하지 않음
+        // ✅ 요청사항: 상단 타이틀은 간단히
         binding.txtTitle.text = "모델을 선택해 주세요"
 
         // ✅ (요구사항) ModelSelectActivity 진입 시마다 새 로그 파일로 세션 시작
         AirulerFileLogger.startNewSession(this, reason = "ModelSelectActivity.onCreate")
         AirulerFileLogger.i(TAG, "ModelSelectActivity created. YESUNAI_BASE_URL=${GlobalParams.YESUNAI_BASE_URL}")
+
+        // ✅ Settings (ModelSelect에서도 바로 진입 가능)
+        binding.btnSettings.setOnClickListener {
+            openSettingsFromModelSelect()
+        }
 
         // ✅ Update Model: 새 창(테이블)로 이동
         binding.btnUpdateAllModels.setOnClickListener {
@@ -189,6 +215,216 @@ class ModelSelectActivity : AppCompatActivity() {
         val targetTileDp = 90f
         val tilePx = (targetTileDp * dm.density).toInt().coerceAtLeast(1)
         return max(3, dm.widthPixels / tilePx)
+    }
+
+    // ---------------- Settings (launch from ModelSelect) ----------------
+
+    private fun openSettingsFromModelSelect() {
+        val previewSizes = queryPreviewSizesSafely()
+        val previewList = ArrayList(previewSizes.map { sizeToSpecWithMp(it) })
+
+        val selectedSize = AppSessionSettings.selectedPreviewSize ?: pickDefaultPreviewSize(previewSizes)
+        val selectedSpec = selectedSize?.let { sizeToSpecWithMp(it) }
+
+        val intent = Intent(this, SettingsActivity::class.java)
+
+        // 해상도 목록/현재 선택
+        intent.putStringArrayListExtra(SettingsActivity.EXTRA_PREVIEW_LIST, previewList)
+        intent.putExtra(SettingsActivity.EXTRA_PREVIEW_SELECTED, selectedSpec)
+
+        // View Options
+        intent.putExtra(SettingsActivity.EXTRA_SHOW_GRID, AppSessionSettings.showGuideGrid)
+        intent.putExtra(SettingsActivity.EXTRA_SHOW_FILM_BOX, AppSessionSettings.showFilmBox)
+        intent.putExtra(SettingsActivity.EXTRA_SHOW_CONF, AppSessionSettings.showConfOnBox)
+        intent.putExtra(SettingsActivity.EXTRA_SHOW_ANGLE, AppSessionSettings.showAngleOnPreview)
+        intent.putExtra(SettingsActivity.EXTRA_SHOW_TILT, AppSessionSettings.showTilt)
+        intent.putExtra(SettingsActivity.EXTRA_SHOW_GOOD_BOX, AppSessionSettings.showGoodBoxOverlay)
+        intent.putExtra(SettingsActivity.EXTRA_SHOW_BAD_BOX, AppSessionSettings.showBadBoxOverlay)
+        intent.putExtra(SettingsActivity.EXTRA_SHOW_HAND, AppSessionSettings.showHandOverlay)
+        intent.putExtra(SettingsActivity.EXTRA_SHOW_MOTION, AppSessionSettings.showMotionOverlay)
+        intent.putExtra(SettingsActivity.EXTRA_SHOW_TRACK, AppSessionSettings.showTrackOverlay)
+
+        // Mode / pipeline
+        intent.putExtra(SettingsActivity.EXTRA_TILT_MODE, AppSessionSettings.tiltMode.name)
+        intent.putExtra(SettingsActivity.EXTRA_YOLO_INTERVAL, AppSessionSettings.yoloFrameInterval)
+        intent.putExtra(SettingsActivity.EXTRA_DIRECTION_CHECK, AppSessionSettings.directionCheckEnabled)
+        intent.putExtra(SettingsActivity.EXTRA_MEASURE_MODE, AppSessionSettings.measureMode.name)
+        intent.putExtra(SettingsActivity.EXTRA_MEASUREMENT_METHOD, AppSessionSettings.measurementMethod.name)
+
+        // Calibration / upload / save result
+        intent.putExtra(SettingsActivity.EXTRA_OFFSET_UPDATE_ENABLED, AppSessionSettings.gridCalibrationEnabled)
+        intent.putExtra(SettingsActivity.EXTRA_UPLOAD_TO_SERVER_ENABLED, AppSessionSettings.uploadToServerEnabled)
+        intent.putExtra(SettingsActivity.EXTRA_SAVE_RESULT_ENABLED, AppSessionSettings.saveResultEnabled)
+
+        // Capture MP
+        intent.putExtra(SettingsActivity.EXTRA_CAPTURE_MP, AppSessionSettings.captureMegapixel)
+
+        // Debug / log
+        intent.putExtra(SettingsActivity.EXTRA_DEBUG_ENABLED, GlobalParams.DEBUG)
+        intent.putExtra(SettingsActivity.EXTRA_LOG_FILE_SAVE_ENABLED, GlobalParams.LOG_FILE_SAVE)
+
+        settingsLauncher.launch(intent)
+    }
+
+    private fun applySettingsFromResult(data: Intent) {
+        // ✅ DEBUG/LOG_FILE_SAVE (GlobalParams)
+        GlobalParams.DEBUG = data.getBooleanExtra(SettingsActivity.RESULT_DEBUG_ENABLED, GlobalParams.DEBUG)
+        GlobalParams.LOG_FILE_SAVE = data.getBooleanExtra(SettingsActivity.RESULT_LOG_FILE_SAVE_ENABLED, GlobalParams.LOG_FILE_SAVE)
+
+        // ✅ Capture MP(50/200)
+        val captureMp = data.getIntExtra(
+            SettingsActivity.RESULT_CAPTURE_MP,
+            AppSessionSettings.captureMegapixel
+        )
+        AppSessionSettings.captureMegapixel = captureMp
+        GlobalParams.applyCaptureMegapixel(captureMp)
+
+        // ✅ Preview 선택(세션 유지)
+        val previewSpec = data.getStringExtra(SettingsActivity.RESULT_PREVIEW)
+        parseSizeSpec(previewSpec)?.let { AppSessionSettings.selectedPreviewSize = it }
+
+        // ✅ View Options (세션 유지)
+        AppSessionSettings.showGuideGrid = data.getBooleanExtra(SettingsActivity.RESULT_SHOW_GRID, AppSessionSettings.showGuideGrid)
+        AppSessionSettings.showFilmBox = data.getBooleanExtra(SettingsActivity.RESULT_SHOW_FILM_BOX, AppSessionSettings.showFilmBox)
+        AppSessionSettings.showConfOnBox = data.getBooleanExtra(SettingsActivity.RESULT_SHOW_CONF, AppSessionSettings.showConfOnBox)
+        AppSessionSettings.showAngleOnPreview = data.getBooleanExtra(SettingsActivity.RESULT_SHOW_ANGLE, AppSessionSettings.showAngleOnPreview)
+        AppSessionSettings.showTilt = data.getBooleanExtra(SettingsActivity.RESULT_SHOW_TILT, AppSessionSettings.showTilt)
+        AppSessionSettings.showGoodBoxOverlay = data.getBooleanExtra(SettingsActivity.RESULT_SHOW_GOOD_BOX, AppSessionSettings.showGoodBoxOverlay)
+        AppSessionSettings.showBadBoxOverlay = data.getBooleanExtra(SettingsActivity.RESULT_SHOW_BAD_BOX, AppSessionSettings.showBadBoxOverlay)
+        AppSessionSettings.showHandOverlay = data.getBooleanExtra(SettingsActivity.RESULT_SHOW_HAND, AppSessionSettings.showHandOverlay)
+        AppSessionSettings.showMotionOverlay = data.getBooleanExtra(SettingsActivity.RESULT_SHOW_MOTION, AppSessionSettings.showMotionOverlay)
+        AppSessionSettings.showTrackOverlay = data.getBooleanExtra(SettingsActivity.RESULT_SHOW_TRACK, AppSessionSettings.showTrackOverlay)
+
+        // ✅ Tilt Mode
+        val tiltModeName = data.getStringExtra(SettingsActivity.RESULT_TILT_MODE)
+        AppSessionSettings.tiltMode = when (tiltModeName) {
+            "NONE" -> TiltMode.NONE
+            "HOUGH" -> TiltMode.HOUGH
+            else -> AppSessionSettings.tiltMode
+        }
+
+        // ✅ YOLO interval
+        AppSessionSettings.yoloFrameInterval = data.getIntExtra(
+            SettingsActivity.RESULT_YOLO_INTERVAL,
+            AppSessionSettings.yoloFrameInterval
+        ).coerceIn(GlobalParams.Defaults.YOLO_INTERVAL_MIN, GlobalParams.Defaults.YOLO_INTERVAL_MAX)
+
+        // ✅ Direction check
+        AppSessionSettings.directionCheckEnabled = data.getBooleanExtra(
+            SettingsActivity.RESULT_DIRECTION_CHECK,
+            AppSessionSettings.directionCheckEnabled
+        )
+
+        // ✅ Measure mode
+        val measureModeName = data.getStringExtra(SettingsActivity.RESULT_MEASURE_MODE)
+        AppSessionSettings.measureMode = when (measureModeName) {
+            "NONE" -> MeasureMode.NONE
+            "MANUAL" -> MeasureMode.MANUAL
+            "AUTO" -> MeasureMode.AUTO
+            else -> AppSessionSettings.measureMode
+        }
+
+        // ✅ Measurement method
+        val measurementMethodName = data.getStringExtra(SettingsActivity.RESULT_MEASUREMENT_METHOD)
+        val method = when (measurementMethodName) {
+            "RULER" -> MeasurementMethod.RULER
+            "GRID" -> MeasurementMethod.GRID
+            else -> AppSessionSettings.measurementMethod
+        }
+        // 200MP 선택 시에는 RULER로 강제(안전장치)
+        AppSessionSettings.measurementMethod = if (captureMp >= 200) MeasurementMethod.RULER else method
+
+        // ✅ Online Offset Update(=Calibration) ON/OFF
+        val beforeCalib = AppSessionSettings.gridCalibrationEnabled
+        val afterCalib = data.getBooleanExtra(
+            SettingsActivity.RESULT_OFFSET_UPDATE_ENABLED,
+            GlobalParams.Defaults.OFFSET_CALIBRATION_ENABLED
+        )
+        AppSessionSettings.gridCalibrationEnabled = afterCalib
+        AppSessionSettings.offsetCalibrationUserOverridden = true
+
+        // ON -> OFF 로 전환되는 경우: 현재까지의 offset을 (가능하면) 마지막 선택 모델 JSON에 저장
+        if (beforeCalib && !afterCalib) {
+            runCatching {
+                val stored = ModelStore.get(this)
+                val base = stored?.trim()?.substringBefore("_FO")
+                if (!base.isNullOrBlank()) {
+                    GridOnlineOffsetCalibrationStore.persistOffsetsToModelJson(this, base)
+                }
+            }
+        }
+
+        // ✅ Upload / Save Result
+        AppSessionSettings.uploadToServerEnabled = data.getBooleanExtra(
+            SettingsActivity.RESULT_UPLOAD_TO_SERVER_ENABLED,
+            AppSessionSettings.uploadToServerEnabled
+        )
+        AppSessionSettings.saveResultEnabled = data.getBooleanExtra(
+            SettingsActivity.RESULT_SAVE_RESULT_ENABLED,
+            AppSessionSettings.saveResultEnabled
+        )
+
+        // (ModelSelect에서는 토스트/상태 표시를 최소화)
+        AirulerFileLogger.i(
+            TAG,
+            "Settings applied from ModelSelect: captureMp=$captureMp, preview=${AppSessionSettings.selectedPreviewSize}, " +
+                "measureMode=${AppSessionSettings.measureMode}, method=${AppSessionSettings.measurementMethod}"
+        )
+    }
+
+    private fun queryPreviewSizesSafely(): List<Size> {
+        return try {
+            val cm = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            val backId = cm.cameraIdList.firstOrNull { id ->
+                val chars = cm.getCameraCharacteristics(id)
+                chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
+            } ?: return emptyList()
+
+            val chars = cm.getCameraCharacteristics(backId)
+            val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return emptyList()
+            val arr = map.getOutputSizes(SurfaceTexture::class.java) ?: return emptyList()
+
+            arr.toList().sortedByDescending { it.width.toLong() * it.height.toLong() }
+        } catch (e: Throwable) {
+            // 권한/기기 특이 케이스: 해상도 목록은 비워두고 Settings는 여전히 열리게
+            AirulerFileLogger.w(TAG, "queryPreviewSizesSafely failed: ${e.message}")
+            emptyList()
+        }
+    }
+
+    private fun pickDefaultPreviewSize(previewSizes: List<Size>): Size? {
+        if (previewSizes.isEmpty()) return null
+        val targetAspect = 16f / 9f
+
+        fun aspectDiff(size: Size): Float {
+            val a = size.width.toFloat() / size.height.toFloat()
+            return abs(a - targetAspect)
+        }
+
+        val candidates = previewSizes
+            .filter { it.width > it.height }
+            .sortedWith(
+                compareBy<Size> { aspectDiff(it) }
+                    .thenBy { abs(it.width - 1280) }
+            )
+
+        return candidates.firstOrNull() ?: previewSizes.firstOrNull()
+    }
+
+    private fun parseSizeSpec(spec: String?): Size? {
+        if (spec.isNullOrBlank()) return null
+        val core = spec.substringBefore(" ")
+        val parts = core.split("x")
+        if (parts.size != 2) return null
+        val w = parts[0].toIntOrNull() ?: return null
+        val h = parts[1].toIntOrNull() ?: return null
+        return Size(w, h)
+    }
+
+    private fun sizeToSpecWithMp(size: Size): String {
+        val mp = size.width.toDouble() * size.height.toDouble() / 1_000_000.0
+        val mpStr = String.format("%.1f", mp)
+        return "${size.width}x${size.height} (${mpStr}MP)"
     }
 
     // ---------------- Open Main (with file guards) ----------------

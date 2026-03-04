@@ -1337,7 +1337,7 @@ class InferencePipeline(
             filmCornerPrereqToastShown = true
             val model = (getSelectedModelName() ?: ModelStore.get(activity)).orEmpty().trim()
             activity.runOnUiThread {
-                showToast("CV ROI용 JSON/roi_TL/TR/BR/BL_*가 없습니다: ${model}.json")
+                showToast("JSON에 roi_TL/TR/BR/BL_*가 없습니다: ${model}.json")
                 appendStatus(
                     "Corner prerequisites missing: need ${model}.json with " +
                             FILM_CORNER_ROI_KEYS.joinToString()

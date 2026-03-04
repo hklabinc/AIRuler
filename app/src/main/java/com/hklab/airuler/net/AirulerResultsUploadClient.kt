@@ -63,7 +63,7 @@ object AirulerResultsUploadClient {
             client.newCall(req).execute().use { resp ->
                 val code = resp.code
                 val bodyStr = resp.body?.string().orEmpty()
-                if (resp.isSuccessful) UploadResult(true, "업로드", code)
+                if (resp.isSuccessful) UploadResult(true, "업로드 성공", code)
                 else UploadResult(false, "업로드 실패(code=$code): $bodyStr", code)
             }
         } catch (e: Exception) {

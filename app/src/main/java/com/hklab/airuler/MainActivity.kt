@@ -691,7 +691,7 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("Update Model")
             .setMessage(
-                "현재 모델 파일(tflite/json)을 업데이트(다운로드)합니다.\n\n" +
+                "현재 모델 파일(tflite/json)을 업데이트 합니다.\n\n" +
                     "Model: $base\n\n" +
                     "계속할까요?"
             )
