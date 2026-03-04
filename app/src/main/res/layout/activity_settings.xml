@@ -201,16 +201,16 @@
                 android:orientation="horizontal">
 
                 <RadioButton
-                    android:id="@+id/rbMethodRuler"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Ruler 기반" />
-
-                <RadioButton
                     android:id="@+id/rbMethodGrid"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Grid 기반" />
+
+                <RadioButton
+                    android:id="@+id/rbMethodRuler"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Ruler 기반" />
             </RadioGroup>
         </LinearLayout>
 

@@ -153,7 +153,7 @@
             android:textStyle="bold"
             android:textSize="12sp"
             android:textColor="@android:color/black"
-            android:text="Date" />
+            android:text="TFlite Date" />
 
         <TextView
             android:id="@+id/hJson"
@@ -165,7 +165,7 @@
             android:textStyle="bold"
             android:textSize="12sp"
             android:textColor="@android:color/black"
-            android:text="JSON" />
+            android:text="JSON Date" />
 
     </LinearLayout>
 
