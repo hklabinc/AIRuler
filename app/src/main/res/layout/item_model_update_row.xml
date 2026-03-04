@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/rowRoot"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:background="@android:color/transparent">
+
+    <TextView
+        android:id="@+id/cNo"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="0.55"
+        android:background="@drawable/bg_table_cell"
+        android:gravity="center"
+        android:textSize="12sp"
+        android:textColor="@android:color/black" />
+
+    <TextView
+        android:id="@+id/cModel"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1.35"
+        android:background="@drawable/bg_table_cell"
+        android:gravity="center_vertical"
+        android:textSize="12sp"
+        android:textColor="@android:color/black" />
+
+    <TextView
+        android:id="@+id/cSize"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="0.75"
+        android:background="@drawable/bg_table_cell"
+        android:gravity="center"
+        android:textSize="12sp"
+        android:textColor="@android:color/black" />
+
+    <TextView
+        android:id="@+id/cDate"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1.55"
+        android:background="@drawable/bg_table_cell"
+        android:gravity="center"
+        android:textSize="12sp"
+        android:textColor="@android:color/black" />
+
+    <TextView
+        android:id="@+id/cJson"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1.55"
+        android:background="@drawable/bg_table_cell"
+        android:gravity="center"
+        android:textSize="12sp"
+        android:textColor="@android:color/black" />
+
+</LinearLayout>

@@ -225,7 +225,9 @@ object GridAnalysisProcessor {
         // 5) Grid.json 저장 (Python GUI의 on_save_grid_points 포맷과 최대한 동일)
         val jsonFile = File(ModelFileStore.modelsDir(context), "Grid.json")
         val root = JSONObject()
-        root.put("version", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")))
+        // ✅ (요구사항) 테이블(JSON 컬럼) 표시를 위해 updated 필드 + 사람이 읽기 쉬운 포맷 사용
+        //   예: "2026-03-04 07:44:29"
+        root.put("updated", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")))
         root.put("image_path", imageUri.toString())
         root.put("rows", rows)
         root.put("cols", cols)

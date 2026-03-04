@@ -25,7 +25,7 @@
         android:clipToPadding="false"
         android:padding="2dp"/>
 
-    <!-- ✅ Bottom row: Update Grid (left) + (right group) -->
+    <!-- ✅ Bottom row: Update Model + Update SW -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -33,45 +33,11 @@
         android:gravity="center_vertical"
         android:layout_marginTop="6dp">
 
-        <!-- ✅ Left: Update Grid -->
-        <Button
-            android:id="@+id/btnUpdateGrid"
-            android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:minHeight="36dp"
-            android:minWidth="0dp"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:paddingTop="3dp"
-            android:paddingBottom="3dp"
-            android:textSize="12sp"
-            android:text="Update Grid"
-            android:backgroundTint="@android:color/holo_blue_dark"
-            android:textColor="@android:color/white" />
-
         <!-- ✅ 가운데를 비워서 오른쪽 그룹을 끝으로 밀어줌 -->
         <Space
             android:layout_width="0dp"
             android:layout_height="0dp"
             android:layout_weight="1" />
-
-        <!-- ✅ Right: Check / Update All / SW Update -->
-        <Button
-            android:id="@+id/btnCheckAllModels"
-            android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:minHeight="36dp"
-            android:minWidth="0dp"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:paddingTop="3dp"
-            android:paddingBottom="3dp"
-            android:textSize="12sp"
-            android:text="Check Models" />
-
-        <Space
-            android:layout_width="8dp"
-            android:layout_height="0dp" />
 
         <Button
             android:id="@+id/btnUpdateAllModels"
@@ -84,13 +50,13 @@
             android:paddingTop="3dp"
             android:paddingBottom="3dp"
             android:textSize="12sp"
-            android:text="Update Models" />
+            android:text="Update Model" />
 
         <Space
             android:layout_width="8dp"
             android:layout_height="0dp" />
 
-        <!-- ✅ SW Update 버튼 (길게 눌러 다운로드) -->
+        <!-- ✅ SW Update -->
         <Button
             android:id="@+id/btnSwUpdate"
             android:layout_width="wrap_content"

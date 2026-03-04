@@ -55,6 +55,13 @@
             </intent-filter>
         </activity>
 
+        <!-- ✅ 모델 업데이트/관리(테이블) 화면 -->
+        <activity
+            android:name=".model.ModelUpdateActivity"
+            android:theme="@style/Theme.AIRuler.Settings"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
         <!-- ✅ 2. 메인 카메라 / YOLO 화면 -->
         <activity
             android:name=".MainActivity"

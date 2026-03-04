@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@android:color/white"
+    android:padding="10dp">
+
+    <!-- ✅ 5 buttons in one row -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <Button
+            android:id="@+id/btnAddAll"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:minWidth="0dp"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:textSize="11sp"
+            android:text="Add All"
+            android:layout_marginEnd="4dp" />
+
+        <Button
+            android:id="@+id/btnAddModel"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:minWidth="0dp"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:textSize="11sp"
+            android:text="Add Model"
+            android:layout_marginEnd="4dp" />
+
+        <Button
+            android:id="@+id/btnDeleteSelected"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:minWidth="0dp"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:textSize="11sp"
+            android:text="Deleted Selected"
+            android:layout_marginEnd="4dp" />
+
+        <Button
+            android:id="@+id/btnUpdateSelected"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:minWidth="0dp"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:textSize="11sp"
+            android:text="Updated Selected"
+            android:layout_marginEnd="4dp" />
+
+        <Button
+            android:id="@+id/btnUpdateAll"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:minWidth="0dp"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:textSize="11sp"
+            android:text="Updated All" />
+
+    </LinearLayout>
+
+    <!-- Status + progress -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="8dp">
+
+        <TextView
+            android:id="@+id/txtJobStatus"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text=""
+            android:textSize="12sp"
+            android:textColor="@android:color/black" />
+
+        <ProgressBar
+            android:id="@+id/progressBar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:visibility="gone" />
+
+    </LinearLayout>
+
+    <!-- ✅ Sort header row (clickable) -->
+    <LinearLayout
+        android:id="@+id/sortHeader"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="8dp">
+
+        <TextView
+            android:id="@+id/hNo"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="0.55"
+            android:background="@drawable/bg_table_cell"
+            android:gravity="center"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            android:textColor="@android:color/black"
+            android:text="No" />
+
+        <TextView
+            android:id="@+id/hModel"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1.35"
+            android:background="@drawable/bg_table_cell"
+            android:gravity="center"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            android:textColor="@android:color/black"
+            android:text="Model" />
+
+        <TextView
+            android:id="@+id/hSize"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="0.75"
+            android:background="@drawable/bg_table_cell"
+            android:gravity="center"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            android:textColor="@android:color/black"
+            android:text="Size" />
+
+        <TextView
+            android:id="@+id/hDate"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1.55"
+            android:background="@drawable/bg_table_cell"
+            android:gravity="center"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            android:textColor="@android:color/black"
+            android:text="Date" />
+
+        <TextView
+            android:id="@+id/hJson"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1.55"
+            android:background="@drawable/bg_table_cell"
+            android:gravity="center"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            android:textColor="@android:color/black"
+            android:text="JSON" />
+
+    </LinearLayout>
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recyclerTable"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="2dp"
+        android:clipToPadding="false" />
+
+</LinearLayout>
