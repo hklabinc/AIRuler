@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
+    android:layout_width="330dp"
     android:layout_height="wrap_content"
     android:orientation="vertical"
     android:padding="16dp">
@@ -10,7 +10,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textSize="12sp"
-        android:textColor="@android:color/black"
+        android:textColor="@android:color/white"
         android:lineSpacingExtra="2dp" />
 
     <Space
@@ -22,7 +22,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textSize="13sp"
-        android:textColor="@android:color/black" />
+        android:textColor="@android:color/white" />
 
     <Space
         android:layout_width="match_parent"
@@ -43,18 +43,8 @@
         android:layout_height="wrap_content"
         android:layout_gravity="end"
         android:textSize="12sp"
-        android:textColor="@android:color/black"
+        android:textColor="@android:color/white"
         android:visibility="gone"
         android:text="" />
-
-    <TextView
-        android:id="@+id/txtSwCopyright"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:paddingTop="10dp"
-        android:text="(c) hklab"
-        android:textSize="10sp"
-        android:textColor="@android:color/darker_gray"
-        android:gravity="end" />
 
 </LinearLayout>

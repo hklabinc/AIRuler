@@ -1046,36 +1046,20 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        // ✅ (복원) 예전 동작: internal/models/<model>.jpg 를 반투명 오버레이로 표시
-        //  - 모델명에 "_FO"가 붙어있어도 파일명은 baseModel 로 저장되어 있으므로 제거
+        // ✅ 모델 안내 오버레이 이미지
+        // - 서버(images_overlay)에서 다운로드하지 않고, 앱 내장 assets/overlay/<model>.jpg 를 사용
+        // - 모델명에 "_FO"가 붙어있어도 baseModel 로 정규화
         val baseModel = model.trim().substringBefore("_FO")
 
-        // 1) 정상 경로: internal/models/<baseModel>.jpg
-        val jpg = ModelFileStore.downloadedModelJpgFile(this, baseModel)
-
-        // 2) (호환) 예전/수동 복사 등으로 확장자/대소문자가 다른 경우를 대비
-        //    - <baseModel>.JPG / .jpeg / .png 등도 허용
-        val overlayFile: File? = if (jpg.exists()) {
-            jpg
-        } else {
-            ModelFileStore.modelsDir(this)
-                .listFiles()
-                ?.firstOrNull { f ->
-                    f.isFile &&
-                            f.nameWithoutExtension.equals(baseModel, ignoreCase = true) &&
-                            (
-                                    f.extension.equals("jpg", ignoreCase = true) ||
-                                            f.extension.equals("jpeg", ignoreCase = true) ||
-                                            f.extension.equals("png", ignoreCase = true)
-                                    )
-                }
-        }
-
-        if (overlayFile != null && overlayFile.exists()) {
-            setOverlayImageFile(overlayFile)
+        val assetUri = ModelFileStore.overlayAssetUriOrNull(this, baseModel)
+        if (!assetUri.isNullOrBlank()) {
+            binding.overlayImageView.load(assetUri) {
+                crossfade(true)
+                allowHardware(false)
+            }
             binding.overlayImageView.visibility = View.VISIBLE
         } else {
-            // 이미지가 없으면(다운로드 전/누락) 오버레이는 숨김
+            // 이미지가 없으면 오버레이는 숨김
             binding.overlayImageView.visibility = View.GONE
         }
     }

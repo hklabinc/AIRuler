@@ -62,15 +62,8 @@ class AirulerGalleryFoldersActivity : AppCompatActivity() {
 
         // internal/models 는 jpg/json/tflite 로 분리해서 표시
         val modelFiles = modelDir.listFiles()?.filter { it.isFile } ?: emptyList()
-        val jpgExts = setOf("jpg", "jpeg")
-        val modelJpgFiles = modelFiles
-            .filter { jpgExts.contains(it.extension.lowercase(Locale.US)) }
-            .sortedByDescending { it.lastModified() }
         val modelJsonFiles = modelFiles
             .filter { it.extension.equals("json", ignoreCase = true) }
-            .sortedByDescending { it.lastModified() }
-        val modelTfliteFiles = modelFiles
-            .filter { it.extension.equals("tflite", ignoreCase = true) }
             .sortedByDescending { it.lastModified() }
 
         // ✅ internal/logs 는 txt 로만 누적 저장
@@ -79,8 +72,6 @@ class AirulerGalleryFoldersActivity : AppCompatActivity() {
             ?.filter { it.isFile && it.extension.equals("txt", ignoreCase = true) }
             ?.sortedByDescending { it.lastModified() }
             ?: emptyList()
-
-        val modelJpgPreview = modelJpgFiles.firstOrNull()?.let { android.net.Uri.fromFile(it) }
 
         return listOf(
             FolderEntry(
@@ -121,26 +112,10 @@ class AirulerGalleryFoldersActivity : AppCompatActivity() {
             FolderEntry(
                 kind = AirulerGalleryActivity.SOURCE_KIND_INTERNAL,
                 key = "models",
-                title = "internal/models (jpg)",
-                imageCount = modelJpgFiles.size,
-                preview = modelJpgPreview,
-                extFilter = "jpg"
-            ),
-            FolderEntry(
-                kind = AirulerGalleryActivity.SOURCE_KIND_INTERNAL,
-                key = "models",
                 title = "internal/models (json)",
                 imageCount = modelJsonFiles.size,
                 preview = android.R.drawable.ic_menu_agenda,
                 extFilter = "json"
-            ),
-            FolderEntry(
-                kind = AirulerGalleryActivity.SOURCE_KIND_INTERNAL,
-                key = "models",
-                title = "internal/models (tflite)",
-                imageCount = modelTfliteFiles.size,
-                preview = android.R.drawable.ic_menu_save,
-                extFilter = "tflite"
             ),
             FolderEntry(
                 kind = AirulerGalleryActivity.SOURCE_KIND_INTERNAL,
@@ -156,7 +131,7 @@ class AirulerGalleryFoldersActivity : AppCompatActivity() {
     private fun openFolder(entry: FolderEntry) {
         // internal/* (json/tflite/txt) => 바로 파일 리스트 화면으로
         val ext = entry.extFilter?.lowercase(Locale.US)
-        if (entry.kind == AirulerGalleryActivity.SOURCE_KIND_INTERNAL && (ext == "json" || ext == "tflite" || ext == "txt")) {
+        if (entry.kind == AirulerGalleryActivity.SOURCE_KIND_INTERNAL && (ext == "json" || ext == "txt")) {
             val title = entry.title
             val i = Intent(this, AirulerInternalFilesActivity::class.java).apply {
                 putExtra(AirulerInternalFilesActivity.EXTRA_DIR_KEY, entry.key)

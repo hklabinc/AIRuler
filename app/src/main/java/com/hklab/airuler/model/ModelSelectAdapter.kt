@@ -51,27 +51,16 @@ class ModelSelectAdapter(
         txtName.text = name
 
         // ✅ 아이콘 로딩 우선순위:
-        // 1) 내부 models/<name>.jpg (다운로드된 파일)
-        // 2) assets/model_icons/<name>.jpg (기본 seed)
-        val downloadedJpg = ModelFileStore.downloadedModelJpgFile(ctx, name)
-        when {
-            downloadedJpg.exists() -> {
-                img.load(downloadedJpg) {
-                    crossfade(false)
-                    allowHardware(false)
-                }
+        // 1) assets/overlay/<name>.jpg (내장 오버레이 이미지)
+        // 2) assets/model_icons/<name>.jpg (기존 seed)
+        val uri = ModelFileStore.modelIconAssetUriOrNull(ctx, name)
+        if (uri != null) {
+            img.load(uri) {
+                crossfade(false)
+                allowHardware(false)
             }
-
-            ModelFileStore.assetIconExists(ctx, name) -> {
-                img.load("file:///android_asset/model_icons/$name.jpg") {
-                    crossfade(false)
-                    allowHardware(false)
-                }
-            }
-
-            else -> {
-                img.setImageResource(android.R.drawable.ic_menu_report_image)
-            }
+        } else {
+            img.setImageResource(android.R.drawable.ic_menu_report_image)
         }
 
         holder.itemView.setOnClickListener { onSelect(name) }

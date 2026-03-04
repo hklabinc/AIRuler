@@ -252,14 +252,62 @@ object ModelFileStore {
         }.getOrDefault(false)
 
     // ----------------------------
-    // Assets (icons only)
+    // Assets (overlay / icons)
     // ----------------------------
 
     /**
-     * ✅ 모델 아이콘은 아직 assets/model_icons 를 seed/기본값으로 사용 (요청 사항에서 제거 대상 아님)
+     * ✅ 서버(images_overlay)에서 모델 이미지를 더 이상 다운로드하지 않고,
+     *    앱에 내장된 assets/overlay/<model>.jpg 를 사용합니다.
+     *
+     * - 모델명에는 '-' 등 리소스 네이밍 제약이 있을 수 있어(res/drawable 대신) assets 를 사용합니다.
      */
-    fun assetIconExists(context: Context, model: String): Boolean {
-        val list = runCatching { context.assets.list("model_icons") }.getOrNull() ?: return false
-        return list.any { it.equals("$model.jpg", true) || it.equals("$model.png", true) }
+
+    @Volatile private var overlayAssetNames: Set<String>? = null
+    @Volatile private var modelIconAssetNames: Set<String>? = null
+
+    private fun listAssetsOnce(context: Context, dir: String): Set<String> {
+        val list = runCatching { context.assets.list(dir) }.getOrNull()
+        return list?.toSet() ?: emptySet()
+    }
+
+    private fun overlayNames(context: Context): Set<String> {
+        val cached = overlayAssetNames
+        if (cached != null) return cached
+        val v = listAssetsOnce(context, "overlay")
+        overlayAssetNames = v
+        return v
+    }
+
+    private fun modelIconNames(context: Context): Set<String> {
+        val cached = modelIconAssetNames
+        if (cached != null) return cached
+        val v = listAssetsOnce(context, "model_icons")
+        modelIconAssetNames = v
+        return v
+    }
+
+    private fun pickAssetFileName(names: Set<String>, model: String): String? {
+        // assets는 case-sensitive 입니다. (모델명 파일도 동일 케이스로 넣는 것을 권장)
+        val candidates = listOf("$model.jpg", "$model.jpeg", "$model.png")
+        return candidates.firstOrNull { names.contains(it) }
+    }
+
+    /** assets/overlay/<model>.jpg (또는 jpeg/png) URI 반환. 없으면 null */
+    fun overlayAssetUriOrNull(context: Context, model: String): String? {
+        val base = baseModelKey(model)
+        val fn = pickAssetFileName(overlayNames(context), base) ?: return null
+        return "file:///android_asset/overlay/$fn"
+    }
+
+    /**
+     * 모델 선택 타일 아이콘 URI
+     * - 1순위: assets/overlay/<model>.jpg
+     * - 2순위: assets/model_icons/<model>.jpg (기존 seed 유지)
+     */
+    fun modelIconAssetUriOrNull(context: Context, model: String): String? {
+        overlayAssetUriOrNull(context, model)?.let { return it }
+        val base = baseModelKey(model)
+        val fn = pickAssetFileName(modelIconNames(context), base) ?: return null
+        return "file:///android_asset/model_icons/$fn"
     }
 }

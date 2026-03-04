@@ -21,7 +21,7 @@ object HawkModelDownloader {
     //  - runs:   /ruler/runs
     //  - list:   /api/files/list-runs?scope=ruler
     //  - json:   /ruler/profiles/<model>/<model>.json
-    //  - overlay:/ruler/profiles/<model>/images_overlay/<model>.jpg (jpg/png 둘 다 시도)
+    //  - (overlay 이미지는 더 이상 다운로드하지 않음: 앱 내장 assets/overlay 사용)
     // ---------------------------------------------------------------------
     private fun baseRunsUrl(): String = GlobalParams.yesunaiUrl("/ruler/runs")
     private fun listRunsApi(): String = GlobalParams.yesunaiUrl("/api/files/list-runs?scope=ruler")
@@ -67,49 +67,9 @@ object HawkModelDownloader {
         val tfliteDst = ModelFileStore.runTfliteFile(context, latestFolder)
         val tfliteTmp = File(tfliteDst.parentFile, tfliteDst.name + ".tmp")
 
-        // 0~85% : tflite
+        // 0~95% : tflite
         httpDownload(tfliteUrl, tfliteTmp) { p ->
-            onProgress(((p * 85) / 100).coerceIn(0, 85))
-        }
-
-        // 85~95% : jpg
-        // ✅ overlay 이미지: profiles/<model>/images_overlay/
-        // - 우선 .jpg 시도 후 실패하면 .png/.jpeg 순으로 재시도
-        val jpgCandidates = listOf(
-            "${baseProfilesUrl()}/${baseModel}/images_overlay/${baseModel}.jpg",
-            "${baseProfilesUrl()}/${baseModel}/images_overlay/${baseModel}.png",
-            "${baseProfilesUrl()}/${baseModel}/images_overlay/${baseModel}.jpeg"
-        )
-        val jpgDst = ModelFileStore.downloadedModelJpgFile(context, baseModel)
-        val jpgTmp = File(jpgDst.parentFile, jpgDst.name + ".tmp")
-
-        runCatching {
-            var lastErr: Throwable? = null
-            var ok = false
-
-            for (u in jpgCandidates) {
-                try {
-                    httpDownload(u, jpgTmp) { p ->
-                        onProgress((85 + (p * 10) / 100).coerceIn(85, 95))
-                    }
-                    ok = true
-                    break
-                } catch (e: Throwable) {
-                    lastErr = e
-                }
-            }
-
-            if (!ok) throw (lastErr ?: IllegalStateException("overlay download failed"))
-            atomicReplace(jpgTmp, jpgDst)
-        }.onFailure { e ->
-            Log.w(
-                "HawkModelDownloader",
-                "Model overlay download failed (model=$baseModel): ${e.javaClass.simpleName}: ${e.message}",
-                e
-            )
-            runCatching { if (jpgTmp.exists()) jpgTmp.delete() }
-            // overlay는 필수는 아니므로 진행은 계속
-            onProgress(100)
+            onProgress(((p * 95) / 100).coerceIn(0, 95))
         }
 
         // ✅ Grid 모델은 서버에 Grid.json 이 없으므로, tflite만 있으면 됨

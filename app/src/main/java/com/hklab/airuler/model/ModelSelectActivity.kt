@@ -105,7 +105,10 @@ class ModelSelectActivity : AppCompatActivity() {
 
                     DownloadManager.STATUS_SUCCESSFUL,
                     DownloadManager.STATUS_FAILED -> {
-                        // 완료 처리는 receiver에서.
+                        // ✅ 일부 기기/상황에서 ACTION_DOWNLOAD_COMPLETE 브로드캐스트가 누락되거나
+                        //    total/sofar가 끝까지 안 맞아 %가 100까지 도달하지 않는 경우가 있어,
+                        //    폴링에서도 완료 처리를 보강합니다.
+                        handleSwUpdateCompleted(id)
                     }
                 }
             }
@@ -117,6 +120,9 @@ class ModelSelectActivity : AppCompatActivity() {
 
         binding = ActivityModelSelectBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // ✅ 타이틀 버전 표기: (v.xx) 괄호 제거 + GlobalParams.SW_VERSION 사용
+        binding.txtTitle.text = "모델을 선택해주세요. ${GlobalParams.SW_VERSION}"
 
         // ✅ (요구사항) ModelSelectActivity 진입 시마다 새 로그 파일로 세션 시작
         AirulerFileLogger.startNewSession(this, reason = "ModelSelectActivity.onCreate")
@@ -166,12 +172,14 @@ class ModelSelectActivity : AppCompatActivity() {
     private fun refresh() {
         val enabled = ModelRegistry.getEnabledModels(this)
 
-        // ✅ Grid는 항상 표시(별도 버튼 제거 요구사항)
-        val merged = LinkedHashSet<String>()
-        merged.add("Grid")
-        enabled.forEach { merged.add(it) }
+        // ✅ Grid는 항상 표시하되, 모델 목록의 '맨 마지막'에 배치
+        val list = ArrayList<String>(enabled.size + 1)
+        enabled.forEach { m ->
+            if (!m.equals("Grid", ignoreCase = true)) list.add(m)
+        }
+        list.add("Grid")
 
-        val items = merged.map { ModelItem.Model(name = it) }
+        val items = list.distinct().map { ModelItem.Model(name = it) }
         adapter.submit(items)
     }
 
@@ -271,8 +279,6 @@ class ModelSelectActivity : AppCompatActivity() {
         val txtStatus = v.findViewById<TextView>(com.hklab.airuler.R.id.txtSwStatus)
         val txtPct = v.findViewById<TextView>(com.hklab.airuler.R.id.txtSwPct)
         val pb = v.findViewById<ProgressBar>(com.hklab.airuler.R.id.progressSw)
-        // (c) hklab
-        v.findViewById<TextView?>(com.hklab.airuler.R.id.txtSwCopyright)?.text = "(c) hklab"
 
         txtInfo.text = buildSwInfoText()
         txtStatus.text = "${SW_UPDATE_FILE_NAME}를 다운로드하여 업데이트할까요?"
@@ -285,8 +291,8 @@ class ModelSelectActivity : AppCompatActivity() {
         val dialog = AlertDialog.Builder(this)
             .setTitle("Update SW")
             .setView(v)
-            .setNegativeButton("Close", null)
-            .setPositiveButton("Update", null)
+            .setNegativeButton("CLOSE", null)
+            .setPositiveButton("UPDATE", null)
             .create()
 
         dialog.setOnShowListener {
@@ -300,6 +306,24 @@ class ModelSelectActivity : AppCompatActivity() {
             val btnUpdate = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
             btnUpdate.setOnClickListener {
                 startSwUpdateDownload()
+            }
+
+            // ✅ 버튼 영역(CLOSE/UPDATE)을 가운데로
+            runCatching {
+                val btnClose = dialog.getButton(AlertDialog.BUTTON_NEGATIVE)
+                val parent = btnClose?.parent
+                if (parent is android.widget.LinearLayout) {
+                    parent.gravity = android.view.Gravity.CENTER_HORIZONTAL
+                }
+            }
+
+            // ✅ 창 폭이 너무 넓지 않도록 약간 축소
+            runCatching {
+                val dm = resources.displayMetrics
+                val desired = (330f * dm.density).toInt()
+                val max = (dm.widthPixels * 0.92f).toInt()
+                val wPx = kotlin.math.min(desired, max)
+                dialog.window?.setLayout(wPx, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
             }
 
             // 이미 다운로드 중이면(예: 다이얼로그를 닫았다가 다시 열었을 때) 진행 표시
@@ -323,15 +347,6 @@ class ModelSelectActivity : AppCompatActivity() {
     }
 
     private fun buildSwInfoText(): String {
-        val lastDlMs = getSharedPreferences(PREF_SW_UPDATE, MODE_PRIVATE)
-            .getLong(KEY_SW_LAST_DOWNLOADED_AT, -1L)
-
-        val lastDl = if (lastDlMs > 0) {
-            formatEpochMs(lastDlMs)
-        } else {
-            null
-        }
-
         val install = runCatching {
             val pi = if (Build.VERSION.SDK_INT >= 33) {
                 packageManager.getPackageInfo(packageName, android.content.pm.PackageManager.PackageInfoFlags.of(0))
@@ -343,16 +358,13 @@ class ModelSelectActivity : AppCompatActivity() {
         }.getOrNull()
 
         return buildString {
-            if (lastDl != null) {
-                append("SW (last downloaded): $lastDl\n")
-            } else {
-                append("SW (last downloaded): \n")
-            }
+            append("Version: ${GlobalParams.SW_VERSION}\n")
             if (install != null) {
                 append("App installed: $install\n")
             } else {
                 append("App installed: \n")
             }
+            append("Provider: HK Lab Inc.\n")
         }
     }
 
@@ -415,9 +427,14 @@ class ModelSelectActivity : AppCompatActivity() {
 
                 updateSwDialogProgress(100, "Downloaded: Download/$SW_UPDATE_FILE_NAME")
 
+                // ✅ 완료 후 UI를 기본 상태로 복귀(다운로드 화면이 계속 남아있지 않도록)
+                swUpdateHandler.postDelayed({ resetSwDialogToIdle() }, 700L)
+
             } else {
                 val reason = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
                 updateSwDialogProgress(null, "Download failed (reason=$reason)")
+
+                swUpdateHandler.postDelayed({ resetSwDialogToIdle() }, 700L)
             }
         }
 
@@ -430,6 +447,22 @@ class ModelSelectActivity : AppCompatActivity() {
 
         // 정보 라벨 갱신
         swDlgInfo?.text = buildSwInfoText()
+    }
+
+    private fun resetSwDialogToIdle() {
+        // 다이얼로그가 닫혔으면 아무것도 하지 않음
+        if (swDialog?.isShowing != true) return
+
+        swDlgProgress?.apply {
+            progress = 0
+            visibility = View.GONE
+        }
+        swDlgPct?.apply {
+            text = ""
+            visibility = View.GONE
+        }
+        swDlgStatus?.text = "${SW_UPDATE_FILE_NAME}를 다운로드하여 업데이트할까요?"
+        swDialog?.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = true
     }
 
     private fun updateSwDialogProgress(pct: Int?, statusMsg: String?) {
