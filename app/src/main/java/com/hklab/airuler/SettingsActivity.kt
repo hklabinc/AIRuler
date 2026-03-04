@@ -203,6 +203,11 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         // 200MP 선택 시 Measurement Method는 Ruler로 고정(요구사항)
+        // ✅ "200MP -> 50MP"로 되돌아갈 때는 50MP의 기본값(Grid 기반)으로 자동 복귀
+        // - 200MP에서는 안전장치로 Method=Ruler 강제 + Grid 비활성화
+        // - 사용자가 다시 50MP를 선택하면 Grid 기반이 기본값이므로 자동으로 Grid를 선택해줍니다.
+        //   (단, 50MP에서는 Ruler/Grid 모두 선택 가능해야 하므로 Ruler를 disable 하지는 않습니다.)
+        var lastWas200Mp = (captureMp >= 200)
         fun updateMethodLockByMp() {
             val is200 = binding.rbCapture200.isChecked
             if (is200) {
@@ -212,7 +217,13 @@ class SettingsActivity : AppCompatActivity() {
             } else {
                 binding.rbMethodGrid.isEnabled = true
                 binding.rbMethodGrid.alpha = 1.0f
+
+                // ✅ 200MP에서 50MP로 돌아오는 순간: 50MP 기본값(Grid)로 자동 선택
+                if (lastWas200Mp) {
+                    binding.rbMethodGrid.isChecked = true
+                }
             }
+            lastWas200Mp = is200
         }
         updateMethodLockByMp()
 
