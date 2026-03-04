@@ -7,6 +7,7 @@ import android.view.View
 import com.hklab.airuler.cv.OpenCvProcessor
 import com.hklab.airuler.inspection.BadBoxPx
 import com.hklab.airuler.inspection.BadBoxCirclePx
+import com.hklab.airuler.yolo.AirulerYoloClasses
 import com.hklab.airuler.yolo.YoloDetection
 import java.util.Locale
 import kotlin.math.max
@@ -521,13 +522,19 @@ class DetectionOverlayView @JvmOverloads constructor(
                     drawTop + d.rect.bottom * drawHeight
                 )
 
-                if (showFilmBox) {
-                    // ✅ 박스 색은 MainActivity에서 최종 결정해서 d.color로 내려줌
+                // ✅ View Options 동작 수정
+                // - Film Box OFF + Good Box ON 인 경우에도 good bbox는 보이도록 해야 함.
+                // - showFilmBox 는 "film bbox" 토글이므로, good 라벨은 예외로 표시합니다.
+                val isGood = AirulerYoloClasses.isGood(d)
+                val drawThisBox = showFilmBox || isGood
+
+                if (drawThisBox) {
+                    // ✅ 박스 색은 파이프라인에서 d.color로 내려줌
                     detectPaint.color = d.color
                     canvas.drawRect(rect, detectPaint)
                 }
 
-                if (showConf) {
+                if (showConf && drawThisBox) {
                     val text = String.format(Locale.US, "%.2f", d.score)
                     val textWidth = textPaint.measureText(text)
                     val textHeight = textPaint.textSize

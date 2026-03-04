@@ -280,7 +280,7 @@ class ModelUpdateActivity : AppCompatActivity() {
         val list = selectedModels.toList().sorted()
         val msg = buildString {
             append("선택한 모델을 삭제할까요?\n")
-            append("(내부 models 폴더의 tflite/json/jpg가 있으면 같이 삭제됩니다)\n\n")
+            append("(내부 models 폴더의 tflite/json가 있으면 같이 삭제됩니다)\n\n")
             append(list.joinToString(", "))
         }
 

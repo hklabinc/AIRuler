@@ -121,8 +121,8 @@ class ModelSelectActivity : AppCompatActivity() {
         binding = ActivityModelSelectBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // ✅ 타이틀 버전 표기: (v.xx) 괄호 제거 + GlobalParams.SW_VERSION 사용
-        binding.txtTitle.text = "모델을 선택해주세요. ${GlobalParams.SW_VERSION}"
+        // ✅ 요청사항: 상단 타이틀에는 버전 표기를 하지 않음
+        binding.txtTitle.text = "모델을 선택해 주세요"
 
         // ✅ (요구사항) ModelSelectActivity 진입 시마다 새 로그 파일로 세션 시작
         AirulerFileLogger.startNewSession(this, reason = "ModelSelectActivity.onCreate")
@@ -229,8 +229,8 @@ class ModelSelectActivity : AppCompatActivity() {
         val gridJsonAlt = runCatching { java.io.File(ModelFileStore.modelsDir(this), "grid.json") }.getOrNull()
         val hasGridJson = gridJson.exists() || (gridJsonAlt?.exists() == true)
         if (!hasGridJson) {
-            toast("Grid.json 없음. Grid 모델에서 'Grid 분석'을 먼저 수행하거나, Update Model에서 Grid를 업데이트하세요.")
-            return false
+            // ✅ 요청사항: 일반 모델 진입 시 Grid.json이 없으면 '경고'만 하고 입장은 허용
+            toast("Grid.json 없음. 치수를 재려면 'Grid 분석'을 먼저 수행하세요.")
         }
 
         return true

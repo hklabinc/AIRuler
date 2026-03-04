@@ -207,7 +207,7 @@ object ModelFileStore {
     fun downloadedJpgExists(context: Context, model: String): Boolean =
         downloadedModelJpgFile(context, model).exists()
 
-    /** 다운로드된 tflite/json/jpg를 함께 삭제 */
+    /** 다운로드된 tflite/json를 함께 삭제 */
     fun deleteDownloaded(context: Context, model: String): Boolean =
         runCatching {
             // ✅ tflite는 버전별로 여러 개가 있을 수 있으므로 모두 삭제
@@ -263,7 +263,6 @@ object ModelFileStore {
      */
 
     @Volatile private var overlayAssetNames: Set<String>? = null
-    @Volatile private var modelIconAssetNames: Set<String>? = null
 
     private fun listAssetsOnce(context: Context, dir: String): Set<String> {
         val list = runCatching { context.assets.list(dir) }.getOrNull()
@@ -275,14 +274,6 @@ object ModelFileStore {
         if (cached != null) return cached
         val v = listAssetsOnce(context, "overlay")
         overlayAssetNames = v
-        return v
-    }
-
-    private fun modelIconNames(context: Context): Set<String> {
-        val cached = modelIconAssetNames
-        if (cached != null) return cached
-        val v = listAssetsOnce(context, "model_icons")
-        modelIconAssetNames = v
         return v
     }
 
@@ -299,15 +290,9 @@ object ModelFileStore {
         return "file:///android_asset/overlay/$fn"
     }
 
-    /**
-     * 모델 선택 타일 아이콘 URI
-     * - 1순위: assets/overlay/<model>.jpg
-     * - 2순위: assets/model_icons/<model>.jpg (기존 seed 유지)
-     */
+    /** 모델 선택 타일 아이콘 URI (assets/overlay/<model>.*) */
     fun modelIconAssetUriOrNull(context: Context, model: String): String? {
-        overlayAssetUriOrNull(context, model)?.let { return it }
-        val base = baseModelKey(model)
-        val fn = pickAssetFileName(modelIconNames(context), base) ?: return null
-        return "file:///android_asset/model_icons/$fn"
+        // ✅ 요청사항: assets/model_icons 폴더는 사용하지 않음(실제 없음)
+        return overlayAssetUriOrNull(context, model)
     }
 }

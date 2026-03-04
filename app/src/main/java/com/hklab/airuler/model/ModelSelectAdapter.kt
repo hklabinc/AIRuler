@@ -50,10 +50,8 @@ class ModelSelectAdapter(
         val name = item.name
         txtName.text = name
 
-        // ✅ 아이콘 로딩 우선순위:
-        // 1) assets/overlay/<name>.jpg (내장 오버레이 이미지)
-        // 2) assets/model_icons/<name>.jpg (기존 seed)
-        val uri = ModelFileStore.modelIconAssetUriOrNull(ctx, name)
+        // ✅ 아이콘 로딩: assets/overlay/<name>.jpg (또는 jpeg/png)
+        val uri = ModelFileStore.overlayAssetUriOrNull(ctx, name)
         if (uri != null) {
             img.load(uri) {
                 crossfade(false)

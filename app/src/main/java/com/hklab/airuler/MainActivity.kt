@@ -669,7 +669,7 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * ✅ Settings 버튼 길게 눌렀을 때: ModelSelect 홈의 "Update" 버튼과 동일하게
-     *    (tflite/json/jpg) 파일을 다운로드(업데이트)합니다.
+     *    (tflite/json) 파일을 다운로드(업데이트)합니다.
      *
      *  - 바로 실행하지 않고 확인/취소 팝업을 먼저 띄웁니다.
      *  - 다운로드 완료 후 현재 모델을 리로드하여 앱에 반영합니다.
@@ -691,7 +691,7 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("Update Model")
             .setMessage(
-                "현재 모델 파일(tflite/json/jpg)을 업데이트(다운로드)합니다.\n\n" +
+                "현재 모델 파일(tflite/json)을 업데이트(다운로드)합니다.\n\n" +
                     "Model: $base\n\n" +
                     "계속할까요?"
             )
@@ -807,7 +807,7 @@ class MainActivity : AppCompatActivity() {
 
             append("[Settings]\n")
             append(" - 짧게: 설정 화면\n")
-            append(" - 길게: 현재 모델 파일 업데이트(tflite/json/jpg)\n\n")
+            append(" - 길게: 현재 모델 파일 업데이트(tflite/json)\n\n")
 
             append("[Retry]\n")
             append(" - 짧게: 50MP로 처음부터 재측정\n")

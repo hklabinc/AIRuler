@@ -23,7 +23,7 @@ object GlobalParams {
      * - 개발자가 필요 시 여기 값만 수정하면 됩니다.
      * - UI 표기는 "모델을 선택해주세요. <SW_VERSION>" / "Version: <SW_VERSION>" 형태로 사용합니다.
      */
-    const val SW_VERSION: String = "v.26.0303"
+    const val SW_VERSION: String = "v.26.0304"
 
     /**
      * YESUNAI_BASE_URL + "/" + path 를 안전하게 합칩니다.

@@ -10,7 +10,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textSize="12sp"
-        android:textColor="@android:color/white"
+        android:textColor="?attr/colorOnSurface"
         android:lineSpacingExtra="2dp" />
 
     <Space
@@ -22,7 +22,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textSize="13sp"
-        android:textColor="@android:color/white" />
+        android:textColor="?attr/colorOnSurface" />
 
     <Space
         android:layout_width="match_parent"
@@ -43,7 +43,7 @@
         android:layout_height="wrap_content"
         android:layout_gravity="end"
         android:textSize="12sp"
-        android:textColor="@android:color/white"
+        android:textColor="?attr/colorOnSurface"
         android:visibility="gone"
         android:text="" />
 
