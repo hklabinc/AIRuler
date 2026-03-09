@@ -308,6 +308,11 @@ object FilmPointFinder {
         return out
     }
 
+    private fun grayTo01(grayU8: FloatArray, assumeSrgb: Boolean): DoubleArray {
+        if (assumeSrgb) return srgbToLinear01(grayU8)
+        return DoubleArray(grayU8.size) { (grayU8[it] / 255.0f).toDouble().coerceIn(0.0, 1.0) }
+    }
+
     private fun smoothAlongX(img: DoubleArray, h: Int, w: Int, sigma: Double): DoubleArray {
         if (sigma <= 0.0) return img.copyOf()
         val k = gaussianKernel1d(sigma)
@@ -351,6 +356,7 @@ object FilmPointFinder {
     private fun findLineXByProb(img: Mat, param: Any?): Pt? {
         val p = extractDouble(param, "p", 0.5).coerceIn(0.0, 1.0)
         val sigma = extractDouble(param, "sigma", 1.5).coerceAtLeast(0.0)
+        val assumeSrgb = extractBoolean(param, "assume_srgb", true)
         val startFrac = extractDouble(param, "start_frac", 0.10).coerceIn(0.0, 0.49)
         val endFrac = extractDouble(param, "end_frac", 0.10).coerceIn(0.0, 0.49)
         val combine = extractString(param, "combine", "median")
@@ -360,7 +366,7 @@ object FilmPointFinder {
         val w = img.cols()
 
         val grayU8 = toGrayFloatU8(img)
-        var a = srgbToLinear01(grayU8)
+        var a = grayTo01(grayU8, assumeSrgb)
         a = smoothAlongX(a, h, w, sigma)
 
         // profile = median(a, axis=0)
@@ -418,6 +424,7 @@ object FilmPointFinder {
     private fun findLineYByProb(img: Mat, param: Any?): Pt? {
         val p = extractDouble(param, "p", 0.5).coerceIn(0.0, 1.0)
         val sigma = extractDouble(param, "sigma", 1.5).coerceAtLeast(0.0)
+        val assumeSrgb = extractBoolean(param, "assume_srgb", true)
         val startFrac = extractDouble(param, "start_frac", 0.10).coerceIn(0.0, 0.49)
         val endFrac = extractDouble(param, "end_frac", 0.10).coerceIn(0.0, 0.49)
         val combine = extractString(param, "combine", "median")
@@ -427,7 +434,7 @@ object FilmPointFinder {
         val w = img.cols()
 
         val grayU8 = toGrayFloatU8(img)
-        var a = srgbToLinear01(grayU8)
+        var a = grayTo01(grayU8, assumeSrgb)
         a = smoothAlongY(a, h, w, sigma)
 
         // profile = median(a, axis=1)
@@ -854,11 +861,19 @@ object FilmPointFinder {
         return out
     }
 
-    private fun curveEdgeThresholdAutoX(img: Mat, p: Double, sigma: Double, curveSigma: Double, startFrac: Double, endFrac: Double): DoubleArray {
+    private fun curveEdgeThresholdAutoX(
+        img: Mat,
+        p: Double,
+        sigma: Double,
+        curveSigma: Double,
+        startFrac: Double,
+        endFrac: Double,
+        assumeSrgb: Boolean = true,
+    ): DoubleArray {
         val h = img.rows()
         val w = img.cols()
         val grayU8 = toGrayFloatU8(img)
-        var a = srgbToLinear01(grayU8)
+        var a = grayTo01(grayU8, assumeSrgb)
         a = smoothAlongX(a, h, w, sigma)
 
         val curve = DoubleArray(h) { Double.NaN }
@@ -901,10 +916,11 @@ object FilmPointFinder {
         val curveSigma = extractDouble(param, "curve_sigma", 2.0).coerceAtLeast(0.0)
         val startFrac = extractDouble(param, "start_frac", 0.10).coerceIn(0.0, 0.49)
         val endFrac = extractDouble(param, "end_frac", 0.10).coerceIn(0.0, 0.49)
+        val assumeSrgb = extractBoolean(param, "assume_srgb", true)
 
         val h = img.rows()
         val w = img.cols()
-        val curve = curveEdgeThresholdAutoX(img, p, sigma, curveSigma, startFrac, endFrac)
+        val curve = curveEdgeThresholdAutoX(img, p, sigma, curveSigma, startFrac, endFrac, assumeSrgb)
 
         val ys = ArrayList<Int>()
         val xs = ArrayList<Double>()
@@ -956,11 +972,19 @@ object FilmPointFinder {
         return Pt(xRef, yRef)
     }
 
-    private fun curveEdgeThresholdAutoY(img: Mat, p: Double, sigma: Double, curveSigma: Double, startFrac: Double, endFrac: Double): DoubleArray {
+    private fun curveEdgeThresholdAutoY(
+        img: Mat,
+        p: Double,
+        sigma: Double,
+        curveSigma: Double,
+        startFrac: Double,
+        endFrac: Double,
+        assumeSrgb: Boolean = true,
+    ): DoubleArray {
         val h = img.rows()
         val w = img.cols()
         val grayU8 = toGrayFloatU8(img)
-        var a = srgbToLinear01(grayU8)
+        var a = grayTo01(grayU8, assumeSrgb)
         a = smoothAlongY(a, h, w, sigma)
 
         val curve = DoubleArray(w) { Double.NaN }
@@ -1002,10 +1026,11 @@ object FilmPointFinder {
         val curveSigma = extractDouble(param, "curve_sigma", 2.0).coerceAtLeast(0.0)
         val startFrac = extractDouble(param, "start_frac", 0.10).coerceIn(0.0, 0.49)
         val endFrac = extractDouble(param, "end_frac", 0.10).coerceIn(0.0, 0.49)
+        val assumeSrgb = extractBoolean(param, "assume_srgb", true)
 
         val h = img.rows()
         val w = img.cols()
-        val curve = curveEdgeThresholdAutoY(img, p, sigma, curveSigma, startFrac, endFrac)
+        val curve = curveEdgeThresholdAutoY(img, p, sigma, curveSigma, startFrac, endFrac, assumeSrgb)
 
         val xs = ArrayList<Int>()
         val ys = ArrayList<Double>()
@@ -1186,45 +1211,36 @@ object FilmPointFinder {
         val nL = max(1, PyMath.roundHalfEvenInt(w * leftFrac))
         val nR = max(1, PyMath.roundHalfEvenInt(w * rightFrac))
 
+        val cxRgb: Array<DoubleArray>? = if (rgbLin != null) {
+            Array(3) { ch ->
+                DoubleArray(w) { x ->
+                    val vals = DoubleArray(y1 - y0)
+                    for (yy in y0 until y1) {
+                        vals[yy - y0] = rgbLin[ch][yy * w + x].toDouble()
+                    }
+                    median(vals)
+                }
+            }
+        } else null
+
         val s = DoubleArray(w)
         var t = 0.0
         var rising = true
 
-        if (edgeScalar == "proj" && rgbLin != null) {
+        if (edgeScalar == "proj" && cxRgb != null) {
             // Cx = median(rgb_lin[y0:y1, :, :], axis=0)
-            val cx = Array(3) { DoubleArray(w) }
-            for (x in 0 until w) {
-                val valsR = DoubleArray(y1 - y0)
-                val valsG = DoubleArray(y1 - y0)
-                val valsB = DoubleArray(y1 - y0)
-                for (yy in y0 until y1) {
-                    val idx = yy * w + x
-                    valsR[yy - y0] = rgbLin[0][idx].toDouble()
-                    valsG[yy - y0] = rgbLin[1][idx].toDouble()
-                    valsB[yy - y0] = rgbLin[2][idx].toDouble()
-                }
-                cx[0][x] = median(valsR)
-                cx[1][x] = median(valsG)
-                cx[2][x] = median(valsB)
-            }
-
-            fun medianVec(ch: IntArray): DoubleArray {
-                // unused
-                return doubleArrayOf()
-            }
-
             val cL = DoubleArray(3)
             val cR = DoubleArray(3)
             for (ch in 0..2) {
-                cL[ch] = median(cx[ch].copyOfRange(0, nL))
-                cR[ch] = median(cx[ch].copyOfRange(w - nR, w))
+                cL[ch] = median(cxRgb[ch].copyOfRange(0, nL))
+                cR[ch] = median(cxRgb[ch].copyOfRange(w - nR, w))
             }
             val dC = doubleArrayOf(cR[0] - cL[0], cR[1] - cL[1], cR[2] - cL[2])
             val norm = sqrt(dC[0] * dC[0] + dC[1] * dC[1] + dC[2] * dC[2]) + 1e-12
             val u = doubleArrayOf(dC[0] / norm, dC[1] / norm, dC[2] / norm)
 
             for (x in 0 until w) {
-                val vx = doubleArrayOf(cx[0][x] - cL[0], cx[1][x] - cL[1], cx[2][x] - cL[2])
+                val vx = doubleArrayOf(cxRgb[0][x] - cL[0], cxRgb[1][x] - cL[1], cxRgb[2][x] - cL[2])
                 s[x] = vx[0] * u[0] + vx[1] * u[1] + vx[2] * u[2]
             }
             t = p * norm
@@ -1232,19 +1248,9 @@ object FilmPointFinder {
         } else {
             // grayscale 기반
             val cg = DoubleArray(w)
-            if (rgbLin != null) {
-                // Cx median first
+            if (cxRgb != null) {
                 for (x in 0 until w) {
-                    val vals = DoubleArray(y1 - y0)
-                    for (yy in y0 until y1) {
-                        val idx = yy * w + x
-                        // RGB linear
-                        val rr = rgbLin[0][idx].toDouble()
-                        val gg = rgbLin[1][idx].toDouble()
-                        val bb = rgbLin[2][idx].toDouble()
-                        vals[yy - y0] = 0.2126 * rr + 0.7152 * gg + 0.0722 * bb
-                    }
-                    cg[x] = median(vals)
+                    cg[x] = 0.2126 * cxRgb[0][x] + 0.7152 * cxRgb[1][x] + 0.0722 * cxRgb[2][x]
                 }
             } else {
                 val data = FloatArray(h * w)
@@ -1375,53 +1381,7 @@ object FilmPointFinder {
         endFrac: Double,
         assumeSrgb: Boolean,
     ): DoubleArray {
-        // 기본(assume_srgb=True) 경로는 기존 포팅 로직을 그대로 사용
-        if (assumeSrgb) return curveEdgeThresholdAutoX(img, p, sigma, curveSigma, startFrac, endFrac)
-
-        val h = img.rows()
-        val w = img.cols()
-
-        val grayU8 = toGrayFloatU8(img)
-        var a = DoubleArray(grayU8.size) { (grayU8[it] / 255.0f).toDouble().coerceIn(0.0, 1.0) }
-        a = smoothAlongX(a, h, w, sigma)
-
-        val curve = DoubleArray(h) { Double.NaN }
-        val sw = max(1, PyMath.roundHalfEvenInt(startFrac * w))
-        val ew = max(1, PyMath.roundHalfEvenInt(endFrac * w))
-        val row = DoubleArray(w)
-
-        for (r in 0 until h) {
-            val off = r * w
-            for (x in 0 until w) row[x] = a[off + x]
-
-            val startRef = median(row.copyOfRange(0, sw))
-            val endRef = median(row.copyOfRange(w - ew, w))
-
-            var rising = (endRef > startRef + 1e-6)
-            if (abs(endRef - startRef) <= 1e-6) {
-                val g = gradient1d(row)
-                var best = 0
-                var bestAbs = -1.0
-                for (i in g.indices) {
-                    val ag = abs(g[i])
-                    if (ag > bestAbs) { bestAbs = ag; best = i }
-                }
-                rising = g[best] > 0
-            }
-
-            val dark = min(startRef, endRef)
-            val bright = max(startRef, endRef)
-            val t = (1.0 - p) * dark + p * bright
-
-            val xc = thresholdCrossingVec(row, t, rising) ?: continue
-            if (xc.isFinite()) curve[r] = xc
-        }
-
-        if (curve.any { it.isFinite() }) {
-            val filled = interpNans1d(curve)
-            return nanGaussianSmooth1d(filled, curveSigma)
-        }
-        return curve
+        return curveEdgeThresholdAutoX(img, p, sigma, curveSigma, startFrac, endFrac, assumeSrgb)
     }
 
     private fun findCurveXAssume(
