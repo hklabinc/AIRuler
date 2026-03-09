@@ -7,10 +7,10 @@ class FilmTracker(
     private var trajectoryWindow: Int = 5,        // main_detector2: TRAJECTORY_WINDOW=5
     private var directionThreshold: Float = 0.15f, // main_detector2: DIRECTION_THRESHOLD=0.15
 
-    // ✅ 좌/우 판정 각도 여유(기존 ±45° → 기본 ±60°).
+    // ✅ 좌/우 판정 각도 여유(기존 ±45° → 기본 ±75°).
     //    - 각도가 커질수록 LEFT/RIGHT 영역이 넓어지고, DOWN 영역이 좁아집니다.
     //    - LEFT/RIGHT로 빼는 동작이 DOWN으로 오인식되는 케이스 완화 목적.
-    private var horizontalHalfAngleDeg: Double = 60.0
+    private var horizontalHalfAngleDeg: Double = 75.0
 ) {
     private val trajectory = ArrayDeque<Pair<Int, Int>>() // (x,y)
     private var missingCount = 0
@@ -85,8 +85,8 @@ class FilmTracker(
         var wLeft = 0
 
         // ✅ 기존(±45°)보다 좌/우 각도 영역을 넓혀, 좌/우 이동이 DOWN으로 오인식되는 케이스를 완화.
-        //  - horizontalHalfAngleDeg=60°(기본)면 RIGHT 범위는 [-60°, +60°]
-        //  - DOWN 범위는 (60°, 120°] 로 좁아짐
+        //  - horizontalHalfAngleDeg=75°(기본)면 RIGHT 범위는 [-75°, +75°]
+        //  - DOWN 범위는 (75°, 105°] 로 좁아짐
         val rightHalfAngleRad = Math.toRadians(horizontalHalfAngleDeg.coerceIn(1.0, 89.0))
         val leftBoundaryRad = Math.PI - rightHalfAngleRad // e.g. 120° when rightHalf=60°
         val xThreshD = xThresh.toDouble()

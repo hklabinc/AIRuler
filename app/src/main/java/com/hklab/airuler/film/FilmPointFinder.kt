@@ -1998,6 +1998,15 @@ object FilmPointFinder {
         val sideLockVertical = extractString(param, "side_lock_vertical", "none")
         val sideLockHorizontal = extractString(param, "side_lock_horizontal", "none")
 
+        val refineLocal = extractBoolean(param, "refine_local", true)
+        val refineMaxShift = extractDouble(param, "refine_max_shift", 2.5).coerceAtLeast(0.0)
+        val refineKeepMargin = extractDouble(param, "refine_keep_margin", 4.0).coerceAtLeast(0.0)
+        val refineAnchorCountV = extractInt(param, "refine_anchor_count_v", 60).coerceAtLeast(12)
+        val refineAnchorCountH = extractInt(param, "refine_anchor_count_h", 80).coerceAtLeast(12)
+        val refineResidualAbs = extractDouble(param, "refine_residual_abs", 0.35).coerceAtLeast(0.05)
+        val refineResidualImprove = extractDouble(param, "refine_residual_improve", 0.90).coerceIn(0.1, 1.0)
+        val refineAngleMaxDeg = extractDouble(param, "refine_angle_max_deg", 5.0).coerceAtLeast(0.0)
+
         // 1) gray linear 0..1
         val h = img.rows()
         val w = img.cols()
@@ -2484,6 +2493,229 @@ object FilmPointFinder {
             return x to y
         }
 
+        fun pointLineDistance(L: DoubleArray, x: Double, y: Double): Double {
+            return L[0] * x + L[1] * y + L[2]
+        }
+
+        fun lineXAtY(L: DoubleArray, y: Double): Double? {
+            val nx = L[0]
+            if (abs(nx) < 1e-12) return null
+            return -(L[1] * y + L[2]) / nx
+        }
+
+        fun lineYAtX(L: DoubleArray, x: Double): Double? {
+            val ny = L[1]
+            if (abs(ny) < 1e-12) return null
+            return -(L[0] * x + L[2]) / ny
+        }
+
+        fun lineAngleDeg(L: DoubleArray): Double {
+            var ang = Math.toDegrees(atan2(L[0], -L[1]))
+            if (ang >= 90.0) ang -= 180.0
+            if (ang < -90.0) ang += 180.0
+            return ang
+        }
+
+        fun angleDiffDeg(a: Double, b: Double): Double {
+            var d = abs(a - b) % 180.0
+            if (d > 90.0) d = 180.0 - d
+            return abs(d)
+        }
+
+        fun medianResidualToLine(points: List<Pair<Double, Double>>, L: DoubleArray): Double {
+            if (points.isEmpty()) return Double.POSITIVE_INFINITY
+            val d = DoubleArray(points.size) { idx ->
+                abs(pointLineDistance(L, points[idx].first, points[idx].second))
+            }
+            return median(d)
+        }
+
+        fun lineShiftAtPoint(L0: DoubleArray, L1: DoubleArray, pt: Pair<Double, Double>): Double {
+            val d0 = pointLineDistance(L0, pt.first, pt.second)
+            val d1 = pointLineDistance(L1, pt.first, pt.second)
+            return abs(d0 - d1)
+        }
+
+        fun sampleAnchorsOnLine(
+            L: DoubleArray,
+            otherL: DoubleArray?,
+            sideSign: Double?,
+            margin: Double,
+            count: Int
+        ): List<Pair<Double, Double>> {
+            val out = ArrayList<Pair<Double, Double>>()
+            if (count < 2) return out
+
+            if (abs(L[0]) >= abs(L[1])) {
+                for (k in 0 until count) {
+                    val y = if (count == 1) 0.0 else (h - 1).toDouble() * k.toDouble() / (count - 1).toDouble()
+                    val x = lineXAtY(L, y) ?: continue
+                    if (x < 1.0 || x > w - 2.0) continue
+                    if (otherL != null) {
+                        val d = pointLineDistance(otherL, x, y)
+                        if (sideSign != null) {
+                            if (d * sideSign <= margin) continue
+                        } else {
+                            if (abs(d) <= margin) continue
+                        }
+                    }
+                    out.add(x to y)
+                }
+            } else {
+                for (k in 0 until count) {
+                    val x = if (count == 1) 0.0 else (w - 1).toDouble() * k.toDouble() / (count - 1).toDouble()
+                    val y = lineYAtX(L, x) ?: continue
+                    if (y < 1.0 || y > h - 2.0) continue
+                    if (otherL != null) {
+                        val d = pointLineDistance(otherL, x, y)
+                        if (sideSign != null) {
+                            if (d * sideSign <= margin) continue
+                        } else {
+                            if (abs(d) <= margin) continue
+                        }
+                    }
+                    out.add(x to y)
+                }
+            }
+            return out
+        }
+
+        fun profileCrossingDelta(
+            I: Mat,
+            x: Double,
+            y: Double,
+            nx: Double,
+            ny: Double,
+            pValue: Double,
+            lSamp: Double,
+            step: Double,
+            refMode: String,
+            qDarkValue: Double,
+            qBrightValue: Double,
+            sideLock: String?
+        ): Double? {
+            val count = max(2, floor((2.0 * lSamp) / step).toInt() + 1)
+            val ts = DoubleArray(count)
+            val prof = FloatArray(count)
+            for (i in 0 until count) {
+                val t = -lSamp + step * i.toDouble()
+                ts[i] = t
+                prof[i] = bilinearSample(I, x + t * nx, y + t * ny).toFloat()
+            }
+
+            val dark: Double
+            val bright: Double
+            if (refMode == "percentile") {
+                dark = percentileLinear(prof, qDarkValue * 100.0)
+                bright = percentileLinear(prof, qBrightValue * 100.0)
+            } else {
+                val k = max(2, (0.2 * prof.size).toInt())
+                val left = DoubleArray(k) { prof[it].toDouble() }
+                val right = DoubleArray(k) { prof[prof.size - k + it].toDouble() }
+                val leftRef = median(left)
+                val rightRef = median(right)
+                dark = min(leftRef, rightRef)
+                bright = max(leftRef, rightRef)
+            }
+
+            val target = (1.0 - pValue) * dark + pValue * bright
+            if (prof[prof.lastIndex] < prof[0]) {
+                prof.reverse()
+                ts.reverse()
+            }
+
+            var tCross: Double? = null
+            for (i in 0 until prof.size - 1) {
+                val y0 = prof[i].toDouble()
+                val y1 = prof[i + 1].toDouble()
+                if (y0 < target && y1 >= target) {
+                    val frac = if (y1 == y0) 0.0 else (target - y0) / (y1 - y0)
+                    tCross = ts[i] + frac * (ts[i + 1] - ts[i])
+                    break
+                }
+            }
+            if (tCross == null) return null
+
+            when (sideLock) {
+                "dark" -> tCross += -0.25
+                "bright" -> tCross += +0.25
+            }
+            return tCross
+        }
+
+        fun fitLineFromProfileAnchors(
+            I: Mat,
+            baseL: DoubleArray,
+            anchors: List<Pair<Double, Double>>,
+            pValue: Double,
+            lSamp: Double,
+            step: Double,
+            refMode: String,
+            qDarkValue: Double,
+            qBrightValue: Double,
+            sideLock: String?
+        ): Pair<DoubleArray, List<Pair<Double, Double>>>? {
+            if (anchors.size < 6) return null
+
+            val norm = hypot(baseL[0], baseL[1])
+            val nx = baseL[0] / norm
+            val ny = baseL[1] / norm
+            val pts = ArrayList<Pair<Double, Double>>()
+
+            for (a in anchors) {
+                val delta = profileCrossingDelta(
+                    I = I,
+                    x = a.first,
+                    y = a.second,
+                    nx = nx,
+                    ny = ny,
+                    pValue = pValue,
+                    lSamp = lSamp,
+                    step = step,
+                    refMode = refMode,
+                    qDarkValue = qDarkValue,
+                    qBrightValue = qBrightValue,
+                    sideLock = sideLock
+                ) ?: continue
+                pts.add((a.first + delta * nx) to (a.second + delta * ny))
+            }
+
+            if (pts.size < 6) return null
+            val (Lfit, inPts) = exactConsensusLine(
+                points = pts,
+                tol = max(0.75, ransacTol * 0.75),
+                minInliersRatio = 0.50,
+                maxCandidatePoints = min(exactMaxCandidatePoints, 80),
+                maxEvalPoints = min(exactMaxEvalPoints, 300),
+                centerPt = centerPt
+            )
+            return Lfit to inPts
+        }
+
+        fun maybeAcceptRefinedLine(
+            baseL: DoubleArray,
+            refined: Pair<DoubleArray, List<Pair<Double, Double>>>?,
+            pivotPt: Pair<Double, Double>
+        ): DoubleArray {
+            if (refined == null) return baseL
+            val newL = refined.first
+            val samplePts = refined.second
+            if (samplePts.size < 6) return baseL
+
+            val resBase = medianResidualToLine(samplePts, baseL)
+            val resNew = medianResidualToLine(samplePts, newL)
+            val shift = lineShiftAtPoint(baseL, newL, pivotPt)
+            val angleDiff = angleDiffDeg(lineAngleDeg(baseL), lineAngleDeg(newL))
+            val goodResidual = (resNew <= min(refineResidualAbs, resBase * refineResidualImprove)) ||
+                (resNew <= refineResidualAbs * 0.8)
+
+            return if (goodResidual && shift <= refineMaxShift && angleDiff <= refineAngleMaxDeg) {
+                newL
+            } else {
+                baseL
+            }
+        }
+
         val ptsV: List<Pair<Double, Double>>
         val ptsH: List<Pair<Double, Double>>
 
@@ -2603,11 +2835,83 @@ object FilmPointFinder {
             Lh0
         }
 
-        val pt = intersectLines(Lv, Lh)
-        grayLin.release()
-        if (pt == null) return null
+        val pt0 = intersectLines(Lv, Lh)
+        if (pt0 == null) {
+            grayLin.release()
+            return null
+        }
 
-        return Pt(pt.first, pt.second)
+        var bestPt = pt0
+        if (refineLocal) {
+            val vSideDistances = DoubleArray(inV.size) {
+                pointLineDistance(Lh, inV[it].first, inV[it].second)
+            }
+            val vSideSign = if (vSideDistances.isEmpty() || median(vSideDistances) >= 0.0) 1.0 else -1.0
+
+            val refinePVertical = if (doPShift) pVertical else 0.5
+            val refinePHorizontal = if (doPShift) pHorizontal else 0.5
+            val refineSideLockV = if (doPShift && sideLockVertical != "none") sideLockVertical else null
+            val refineSideLockH = if (doPShift && sideLockHorizontal != "none") sideLockHorizontal else null
+
+            val anchorsV = sampleAnchorsOnLine(
+                L = Lv,
+                otherL = Lh,
+                sideSign = vSideSign,
+                margin = refineKeepMargin,
+                count = refineAnchorCountV
+            )
+            val anchorsH = sampleAnchorsOnLine(
+                L = Lh,
+                otherL = Lv,
+                sideSign = null,
+                margin = refineKeepMargin,
+                count = refineAnchorCountH
+            )
+
+            val LvRef = maybeAcceptRefinedLine(
+                baseL = Lv,
+                refined = fitLineFromProfileAnchors(
+                    I = grayLin,
+                    baseL = Lv,
+                    anchors = anchorsV,
+                    pValue = refinePVertical,
+                    lSamp = pLsamp,
+                    step = pStep,
+                    refMode = pRef,
+                    qDarkValue = qDark,
+                    qBrightValue = qBright,
+                    sideLock = refineSideLockV
+                ),
+                pivotPt = pt0
+            )
+            val LhRef = maybeAcceptRefinedLine(
+                baseL = Lh,
+                refined = fitLineFromProfileAnchors(
+                    I = grayLin,
+                    baseL = Lh,
+                    anchors = anchorsH,
+                    pValue = refinePHorizontal,
+                    lSamp = pLsamp,
+                    step = pStep,
+                    refMode = pRef,
+                    qDarkValue = qDark,
+                    qBrightValue = qBright,
+                    sideLock = refineSideLockH
+                ),
+                pivotPt = pt0
+            )
+
+            val ptRef = intersectLines(LvRef, LhRef)
+            if (ptRef != null) {
+                val shift = hypot(ptRef.first - pt0.first, ptRef.second - pt0.second)
+                if (shift <= refineMaxShift) {
+                    bestPt = ptRef
+                }
+            }
+        }
+
+        grayLin.release()
+        return Pt(bestPt.first, bestPt.second)
     }
 
     private fun orientedPointsGrad(
