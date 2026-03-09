@@ -186,9 +186,26 @@ object FilmPointFinder {
         val qq = q.coerceIn(0.0, 1.0)
         val a = values.copyOf()
         a.sort()
-        val idx = PyMath.roundHalfEvenInt((a.size - 1) * qq)
-            .coerceIn(0, a.size - 1)
-        return a[idx]
+        if (a.size == 1) return a[0]
+        val pos = (a.size - 1).toDouble() * qq
+        val idx = floor(pos).toInt().coerceIn(0, a.size - 1)
+        val frac = pos - idx.toDouble()
+        val lo = a[idx].toDouble()
+        val hi = a[min(idx + 1, a.size - 1)].toDouble()
+        return (lo + frac * (hi - lo)).toFloat()
+    }
+
+    private fun downsamplePointsEven(points: List<Pair<Double, Double>>, maxPoints: Int): List<Pair<Double, Double>> {
+        if (maxPoints <= 1 || points.size <= maxPoints) return points
+        val out = ArrayList<Pair<Double, Double>>(maxPoints)
+        val last = points.size - 1
+        for (k in 0 until maxPoints) {
+            val idx = floor(k.toDouble() * last.toDouble() / (maxPoints - 1).toDouble())
+                .toInt()
+                .coerceIn(0, last)
+            out.add(points[idx])
+        }
+        return out
     }
 
     private fun gradient1d(x: DoubleArray): DoubleArray {
@@ -1979,26 +1996,47 @@ object FilmPointFinder {
     }
 
     // --------------------------------------------------------------------------------------------
-    // (G) cross (간소화 포팅: LSD + RANSAC(TLS+Huber))
+    // (G) cross (안정화 포팅: LSD + deterministic consensus(TLS+Huber) + optional p-shift)
     // --------------------------------------------------------------------------------------------
     private fun findCross(img: Mat, param: Any?): Pt? {
         val p = extractDouble(param, "p", 0.5).coerceIn(0.0, 1.0)
+        val pVertical = p
+        val pHorizontal = p
+
         val method = extractString(param, "method", "lsd")
         val angleWinV = extractDouble(param, "angle_win_v", 40.0)
         val angleWinH = extractDouble(param, "angle_win_h", 12.0)
         val blur = extractDouble(param, "blur", 1.2)
         val magQ = extractDouble(param, "mag_q", 0.75)
+        val useCanny = extractBoolean(param, "use_canny", false)
+        val cannyLow: Int? = when (param) {
+            is JSONObject -> if (param.has("canny_low")) param.optInt("canny_low") else null
+            else -> null
+        }
+        val cannyHigh: Int? = when (param) {
+            is JSONObject -> if (param.has("canny_high")) param.optInt("canny_high") else null
+            else -> null
+        }
+        val maxGradPoints = extractInt(param, "max_points", 20000).coerceAtLeast(32)
+
         val lsdStep = extractDouble(param, "lsd_step", 1.5)
         val lsdLenMin = extractDouble(param, "lsd_len_min", 5.0)
         val segMinContrast = extractDouble(param, "seg_min_contrast", 0.03)
         val segDelta = extractDouble(param, "seg_delta", 2.0)
+
         val ransacTol = extractDouble(param, "ransac_tol", 2.0)
-        val ransacIters = extractInt(param, "ransac_iters", 1200)
         val minInliersRatio = extractDouble(param, "min_inliers_ratio", 0.15)
-        val doPShift = when (param) {
-            is JSONObject -> param.optBoolean("do_p_shift", false)
-            else -> false
-        }
+        val exactMaxCandidatePoints = extractInt(param, "exact_max_candidate_points", 120).coerceAtLeast(2)
+        val exactMaxEvalPoints = extractInt(param, "exact_max_eval_points", 1500).coerceAtLeast(exactMaxCandidatePoints)
+
+        val doPShift = extractBoolean(param, "do_p_shift", false)
+        val pLsamp = extractDouble(param, "p_Lsamp", 12.0)
+        val pStep = extractDouble(param, "p_step", 0.5).coerceAtLeast(0.1)
+        val pRef = extractString(param, "p_ref", "percentile")
+        val qDark = extractDouble(param, "q_dark", 0.10).coerceIn(0.0, 1.0)
+        val qBright = extractDouble(param, "q_bright", 0.90).coerceIn(0.0, 1.0)
+        val sideLockVertical = extractString(param, "side_lock_vertical", "none")
+        val sideLockHorizontal = extractString(param, "side_lock_horizontal", "none")
 
         // 1) gray linear 0..1
         val h = img.rows()
@@ -2010,18 +2048,24 @@ object FilmPointFinder {
 
         fun detectLsdSegments(grayLin32F: Mat): FloatArray? {
             val g8 = Mat()
-            // (I*255).astype(uint8)
             grayLin32F.convertTo(g8, CvType.CV_8UC1, 255.0)
-            val lsd = Imgproc.createLineSegmentDetector(Imgproc.LSD_REFINE_STD)
+
+            val lsd = try {
+                Imgproc.createLineSegmentDetector(Imgproc.LSD_REFINE_STD)
+            } catch (_: Throwable) {
+                Imgproc.createLineSegmentDetector(1)
+            }
+
             val lines = Mat()
             lsd.detect(g8, lines)
             g8.release()
+
             if (lines.empty()) {
                 lines.release()
                 return null
             }
+
             val out = FloatArray(lines.rows() * 4)
-            // lines: Nx1x4 float
             for (i in 0 until lines.rows()) {
                 val v = lines.get(i, 0)
                 out[i * 4 + 0] = v[0].toFloat()
@@ -2132,7 +2176,10 @@ object FilmPointFinder {
             val n = points.size
             var mx = 0.0
             var my = 0.0
-            for (pnt in points) { mx += pnt.first; my += pnt.second }
+            for (pnt in points) {
+                mx += pnt.first
+                my += pnt.second
+            }
             mx /= max(1, n)
             my /= max(1, n)
 
@@ -2150,25 +2197,31 @@ object FilmPointFinder {
             syy /= max(1, n)
             sxy /= max(1, n)
 
-            // smallest eigenvector of covariance
             val tr = sxx + syy
             val det = sxx * syy - sxy * sxy
             val tmp = max(0.0, tr * tr / 4.0 - det)
             val lambda2 = tr / 2.0 - sqrt(tmp)
 
-            var nx: Double
-            var ny: Double
+            val nx: Double
+            val ny: Double
             if (abs(sxy) > 1e-12) {
                 nx = lambda2 - syy
                 ny = sxy
             } else {
-                if (sxx < syy) { nx = 1.0; ny = 0.0 } else { nx = 0.0; ny = 1.0 }
+                if (sxx < syy) {
+                    nx = 1.0
+                    ny = 0.0
+                } else {
+                    nx = 0.0
+                    ny = 1.0
+                }
             }
+
             val norm = hypot(nx, ny)
-            nx /= norm
-            ny /= norm
-            val c = -(nx * mx + ny * my)
-            return doubleArrayOf(nx, ny, c)
+            val nnx = nx / norm
+            val nny = ny / norm
+            val c = -(nnx * mx + nny * my)
+            return doubleArrayOf(nnx, nny, c)
         }
 
         fun huberIrls(points: List<Pair<Double, Double>>, L: DoubleArray, delta: Double, iters: Int): DoubleArray {
@@ -2186,10 +2239,12 @@ object FilmPointFinder {
                 val s = 1.4826 * median(absDev) + 1e-8
                 val k = max(delta, 1.345 * s)
                 val wts = DoubleArray(d.size) { 1.0 }
+
                 for (i in d.indices) {
                     val ad = abs(d[i])
                     if (ad > k) wts[i] = k / max(ad, 1e-8)
                 }
+
                 var wSum = 0.0
                 var mx = 0.0
                 var my = 0.0
@@ -2201,6 +2256,7 @@ object FilmPointFinder {
                 }
                 mx /= (wSum + 1e-9)
                 my /= (wSum + 1e-9)
+
                 var sxx = 0.0
                 var syy = 0.0
                 var sxy = 0.0
@@ -2215,24 +2271,32 @@ object FilmPointFinder {
                 sxx /= (wSum + 1e-9)
                 syy /= (wSum + 1e-9)
                 sxy /= (wSum + 1e-9)
+
                 val tr = sxx + syy
                 val det = sxx * syy - sxy * sxy
                 val tmp = max(0.0, tr * tr / 4.0 - det)
                 val lambda2 = tr / 2.0 - sqrt(tmp)
-                var nnx: Double
-                var nny: Double
+
+                val nnx: Double
+                val nny: Double
                 if (abs(sxy) > 1e-12) {
                     nnx = lambda2 - syy
                     nny = sxy
                 } else {
-                    if (sxx < syy) { nnx = 1.0; nny = 0.0 } else { nnx = 0.0; nny = 1.0 }
+                    if (sxx < syy) {
+                        nnx = 1.0
+                        nny = 0.0
+                    } else {
+                        nnx = 0.0
+                        nny = 1.0
+                    }
                 }
+
                 val nrm = hypot(nnx, nny)
-                nnx /= nrm
-                nny /= nrm
-                nx = nnx
-                ny = nny
+                nx = nnx / nrm
+                ny = nny / nrm
                 c = -(nx * mx + ny * my)
+
                 d = DoubleArray(points.size) { points[it].first * nx + points[it].second * ny + c }
             }
             return doubleArrayOf(nx, ny, c)
@@ -2240,21 +2304,28 @@ object FilmPointFinder {
 
         fun ransacLine(points: List<Pair<Double, Double>>, iters: Int, tol: Double, minInliersRatio: Double, seed: Long): Pair<DoubleArray, List<Pair<Double, Double>>> {
             if (points.size < 2) return lineTls(points) to points
+
             val rng = java.util.Random(seed)
             var bestIdx: IntArray? = null
             var bestL: DoubleArray? = null
             val N = points.size
+
             repeat(iters) {
                 val i = rng.nextInt(N)
                 var j = rng.nextInt(N)
                 while (j == i) j = rng.nextInt(N)
+
                 val L = twoPointLine(points[i], points[j]) ?: return@repeat
-                val nx = L[0]; val ny = L[1]; val c = L[2]
+                val nx = L[0]
+                val ny = L[1]
+                val c = L[2]
+
                 val idx = ArrayList<Int>()
                 for (k in 0 until N) {
                     val d = abs(points[k].first * nx + points[k].second * ny + c)
                     if (d <= tol) idx.add(k)
                 }
+
                 if (bestIdx == null || idx.size > bestIdx!!.size) {
                     bestIdx = idx.toIntArray()
                     bestL = L
@@ -2265,15 +2336,187 @@ object FilmPointFinder {
             if (bestIdx == null || bestIdx!!.size < minInliers) {
                 return lineTls(points) to points
             }
+
             val inliers = bestIdx!!.map { points[it] }
             val Ltls = lineTls(inliers)
             val Lrls = huberIrls(inliers, Ltls, delta = max(0.8, tol * 0.7), iters = 6)
             return Lrls to inliers
         }
 
+        fun exactConsensusLine(
+            points: List<Pair<Double, Double>>,
+            tol: Double,
+            minInliersRatio: Double,
+            maxCandidatePoints: Int,
+            maxEvalPoints: Int,
+            centerPt: Pair<Double, Double>
+        ): Pair<DoubleArray, List<Pair<Double, Double>>> {
+            if (points.size < 2) return lineTls(points) to points
+
+            val candidatePts = downsamplePointsEven(points, maxCandidatePoints)
+            val evalPts = downsamplePointsEven(points, maxEvalPoints)
+            if (candidatePts.size < 2 || evalPts.size < 2) {
+                return ransacLine(points, iters = 1200, tol = tol, minInliersRatio = minInliersRatio, seed = 0L)
+            }
+
+            var bestL: DoubleArray? = null
+            var bestCount = -1
+            var bestMedResidual = Double.POSITIVE_INFINITY
+            var bestCenterDist = Double.POSITIVE_INFINITY
+
+            for (i in 0 until candidatePts.size - 1) {
+                val p1 = candidatePts[i]
+                for (j in i + 1 until candidatePts.size) {
+                    val p2 = candidatePts[j]
+                    val L = twoPointLine(p1, p2) ?: continue
+
+                    val nx = L[0]
+                    val ny = L[1]
+                    val c = L[2]
+
+                    val inlierResiduals = DoubleArray(evalPts.size)
+                    var cnt = 0
+                    for (k in evalPts.indices) {
+                        val d = abs(evalPts[k].first * nx + evalPts[k].second * ny + c)
+                        if (d <= tol) {
+                            inlierResiduals[cnt] = d
+                            cnt++
+                        }
+                    }
+                    if (cnt == 0) continue
+                    if (cnt < bestCount) continue
+
+                    val medResidual = median(inlierResiduals.copyOf(cnt))
+                    val centerDist = abs(centerPt.first * nx + centerPt.second * ny + c)
+
+                    val better = when {
+                        cnt > bestCount -> true
+                        medResidual < bestMedResidual - 1e-9 -> true
+                        abs(medResidual - bestMedResidual) <= 1e-9 &&
+                            centerDist < bestCenterDist - 1e-9 -> true
+                        else -> false
+                    }
+                    if (!better) continue
+
+                    bestL = L
+                    bestCount = cnt
+                    bestMedResidual = medResidual
+                    bestCenterDist = centerDist
+                }
+            }
+
+            if (bestL == null) {
+                return lineTls(points) to points
+            }
+
+            val minInliers = max(2, (minInliersRatio * points.size).toInt())
+            val inliers = ArrayList<Pair<Double, Double>>()
+            val nx = bestL[0]
+            val ny = bestL[1]
+            val c = bestL[2]
+            for (pt in points) {
+                val d = abs(pt.first * nx + pt.second * ny + c)
+                if (d <= tol) inliers.add(pt)
+            }
+
+            if (inliers.size < minInliers) {
+                return lineTls(points) to points
+            }
+
+            val Ltls = lineTls(inliers)
+            val Lrls = huberIrls(inliers, Ltls, delta = max(0.8, tol * 0.7), iters = 6)
+            return Lrls to inliers
+        }
+
+        fun offsetLineToP(
+            I: Mat,
+            L: DoubleArray,
+            inliers: List<Pair<Double, Double>>,
+            pValue: Double,
+            lSamp: Double,
+            step: Double,
+            refMode: String,
+            qDarkValue: Double,
+            qBrightValue: Double,
+            sideLock: String?
+        ): DoubleArray {
+            val nx0 = L[0]
+            val ny0 = L[1]
+            val c0 = L[2]
+            val norm = hypot(nx0, ny0)
+            val nx = nx0 / norm
+            val ny = ny0 / norm
+
+            val deltas = ArrayList<Double>()
+            val stride = max(1, inliers.size / 200)
+
+            for (idx in inliers.indices step stride) {
+                val x = inliers[idx].first
+                val y = inliers[idx].second
+
+                val count = max(2, floor((2.0 * lSamp) / step).toInt() + 1)
+                val ts = DoubleArray(count)
+                val prof = FloatArray(count)
+                for (i in 0 until count) {
+                    val t = -lSamp + step * i.toDouble()
+                    ts[i] = t
+                    prof[i] = bilinearSample(I, x + t * nx, y + t * ny).toFloat()
+                }
+
+                val dark: Double
+                val bright: Double
+                if (refMode == "percentile") {
+                    dark = percentileLinear(prof, qDarkValue * 100.0)
+                    bright = percentileLinear(prof, qBrightValue * 100.0)
+                } else {
+                    val k = max(2, (0.2 * prof.size).toInt())
+                    val left = DoubleArray(k) { prof[it].toDouble() }
+                    val right = DoubleArray(k) { prof[prof.size - k + it].toDouble() }
+                    val leftRef = median(left)
+                    val rightRef = median(right)
+                    dark = min(leftRef, rightRef)
+                    bright = max(leftRef, rightRef)
+                }
+
+                val target = (1.0 - pValue) * dark + pValue * bright
+
+                if (prof[prof.lastIndex] < prof[0]) {
+                    prof.reverse()
+                    ts.reverse()
+                }
+
+                var tCross: Double? = null
+                for (i in 0 until prof.size - 1) {
+                    val y0 = prof[i].toDouble()
+                    val y1 = prof[i + 1].toDouble()
+                    if (y0 < target && y1 >= target) {
+                        val frac = if (y1 == y0) 0.0 else (target - y0) / (y1 - y0)
+                        tCross = ts[i] + frac * (ts[i + 1] - ts[i])
+                        break
+                    }
+                }
+
+                if (tCross != null) deltas.add(tCross)
+            }
+
+            if (deltas.isEmpty()) return L
+
+            var delta = median(deltas.toDoubleArray())
+            when (sideLock) {
+                "dark" -> delta += -0.25
+                "bright" -> delta += +0.25
+            }
+
+            return doubleArrayOf(nx, ny, c0 - delta)
+        }
+
         fun intersectLines(L1: DoubleArray, L2: DoubleArray): Pair<Double, Double>? {
-            val nx1 = L1[0]; val ny1 = L1[1]; val c1 = L1[2]
-            val nx2 = L2[0]; val ny2 = L2[1]; val c2 = L2[2]
+            val nx1 = L1[0]
+            val ny1 = L1[1]
+            val c1 = L1[2]
+            val nx2 = L2[0]
+            val ny2 = L2[1]
+            val c2 = L2[2]
             val det = nx1 * ny2 - nx2 * ny1
             if (abs(det) < 1e-12) return null
             val x = (-c1 * ny2 - (-c2) * ny1) / det
@@ -2281,33 +2524,64 @@ object FilmPointFinder {
             return x to y
         }
 
-        // ① LSD → fallback gradient
         val ptsV: List<Pair<Double, Double>>
         val ptsH: List<Pair<Double, Double>>
 
         if (method.lowercase() == "lsd") {
             val segs = detectLsdSegments(grayLin)
             if (segs == null) {
-                // fallback: oriented points grad (간단 버전)
-                val (pv, ph) = orientedPointsGrad(grayLin, angleWinV, angleWinH, magQ, blur)
+                val (pv, ph) = orientedPointsGrad(
+                    grayLin,
+                    angleWinV,
+                    angleWinH,
+                    magQ,
+                    useCanny,
+                    cannyLow,
+                    cannyHigh,
+                    blur,
+                    maxGradPoints
+                )
                 ptsV = pv
                 ptsH = ph
             } else {
                 var (vSegs, hSegs) = splitSegments(segs, lsdLenMin)
                 vSegs = filterSegmentsStepLike(vSegs)
                 hSegs = filterSegmentsStepLike(hSegs)
+
                 var pv = samplePointsFromSegments(vSegs, lsdStep)
                 var ph = samplePointsFromSegments(hSegs, lsdStep)
+
                 if (pv.size < 10 || ph.size < 10) {
-                    val (pv2, ph2) = orientedPointsGrad(grayLin, angleWinV, angleWinH, magQ, blur)
+                    val (pv2, ph2) = orientedPointsGrad(
+                        grayLin,
+                        angleWinV,
+                        angleWinH,
+                        magQ,
+                        useCanny,
+                        cannyLow,
+                        cannyHigh,
+                        blur,
+                        maxGradPoints
+                    )
                     if (pv.size < 10) pv = ArrayList(pv2)
                     if (ph.size < 10) ph = ArrayList(ph2)
                 }
+
                 ptsV = pv
                 ptsH = ph
             }
         } else {
-            val (pv, ph) = orientedPointsGrad(grayLin, angleWinV, angleWinH, magQ, blur)
+            val (pv, ph) = orientedPointsGrad(
+                grayLin,
+                angleWinV,
+                angleWinH,
+                magQ,
+                useCanny,
+                cannyLow,
+                cannyHigh,
+                blur,
+                maxGradPoints
+            )
             ptsV = pv
             ptsH = ph
         }
@@ -2317,22 +2591,83 @@ object FilmPointFinder {
             return null
         }
 
-        val (Lv, inV) = ransacLine(ptsV, ransacIters, ransacTol, minInliersRatio, seed = 0)
-        val (Lh, inH) = ransacLine(ptsH, ransacIters, ransacTol, minInliersRatio, seed = 1)
+        val centerPt = ((w - 1) / 2.0) to ((h - 1) / 2.0)
+        val (Lv0, inV) = exactConsensusLine(
+            points = ptsV,
+            tol = ransacTol,
+            minInliersRatio = minInliersRatio,
+            maxCandidatePoints = exactMaxCandidatePoints,
+            maxEvalPoints = exactMaxEvalPoints,
+            centerPt = centerPt
+        )
+        val (Lh0, inH) = exactConsensusLine(
+            points = ptsH,
+            tol = ransacTol,
+            minInliersRatio = minInliersRatio,
+            maxCandidatePoints = exactMaxCandidatePoints,
+            maxEvalPoints = exactMaxEvalPoints,
+            centerPt = centerPt
+        )
+
+        val Lv = if (doPShift) {
+            offsetLineToP(
+                I = grayLin,
+                L = Lv0,
+                inliers = inV,
+                pValue = pVertical,
+                lSamp = pLsamp,
+                step = pStep,
+                refMode = pRef,
+                qDarkValue = qDark,
+                qBrightValue = qBright,
+                sideLock = if (sideLockVertical == "none") null else sideLockVertical
+            )
+        } else {
+            Lv0
+        }
+
+        val Lh = if (doPShift) {
+            offsetLineToP(
+                I = grayLin,
+                L = Lh0,
+                inliers = inH,
+                pValue = pHorizontal,
+                lSamp = pLsamp,
+                step = pStep,
+                refMode = pRef,
+                qDarkValue = qDark,
+                qBrightValue = qBright,
+                sideLock = if (sideLockHorizontal == "none") null else sideLockHorizontal
+            )
+        } else {
+            Lh0
+        }
 
         val pt = intersectLines(Lv, Lh)
         grayLin.release()
         if (pt == null) return null
-        // ✅ Python(find_point_cross): subpixel 교점 그대로 반환
+
         return Pt(pt.first, pt.second)
     }
 
-    private fun orientedPointsGrad(grayLin32F: Mat, angleWinV: Double, angleWinH: Double, magQ: Double, blur: Double): Pair<List<Pair<Double, Double>>, List<Pair<Double, Double>>> {
+    private fun orientedPointsGrad(
+        grayLin32F: Mat,
+        angleWinV: Double,
+        angleWinH: Double,
+        magQ: Double,
+        useCanny: Boolean,
+        cannyLow: Int?,
+        cannyHigh: Int?,
+        blur: Double,
+        maxPoints: Int
+    ): Pair<List<Pair<Double, Double>>, List<Pair<Double, Double>>> {
         val I = if (blur > 0) {
             val tmp = Mat()
             Imgproc.GaussianBlur(grayLin32F, tmp, Size(0.0, 0.0), blur, blur)
             tmp
-        } else grayLin32F
+        } else {
+            grayLin32F
+        }
 
         val gx = Mat()
         val gy = Mat()
@@ -2346,31 +2681,67 @@ object FilmPointFinder {
         val gyData = FloatArray(h * w)
         gx.get(0, 0, gxData)
         gy.get(0, 0, gyData)
-        gx.release(); gy.release()
+        gx.release()
+        gy.release()
 
         val mag = FloatArray(h * w)
         val angT = FloatArray(h * w)
         for (i in mag.indices) {
             val gxx = gxData[i]
             val gyy = gyData[i]
-            val m = hypot(gxx.toDouble(), gyy.toDouble()).toFloat()
-            mag[i] = m
+            mag[i] = hypot(gxx.toDouble(), gyy.toDouble()).toFloat()
             var deg = Math.toDegrees(atan2(gyy.toDouble(), gxx.toDouble()) + Math.PI / 2.0)
             deg = ((deg + 90.0) % 180.0) - 90.0
             angT[i] = deg.toFloat()
         }
+
         val thr = quantile(mag, magQ)
+        val base = BooleanArray(h * w) { mag[it] >= thr }
+
+        if (useCanny) {
+            val g8 = Mat()
+            grayLin32F.convertTo(g8, CvType.CV_8UC1, 255.0)
+
+            val low: Int
+            val high: Int
+            if (cannyLow != null && cannyHigh != null) {
+                low = cannyLow
+                high = cannyHigh
+            } else {
+                val g8Data = ByteArray(h * w)
+                g8.get(0, 0, g8Data)
+                val vals = DoubleArray(g8Data.size) { (g8Data[it].toInt() and 0xFF).toDouble() }
+                val med = median(vals)
+                low = max(0, (0.66 * med).toInt())
+                high = min(255, (1.33 * med).toInt())
+            }
+
+            val ed = Mat()
+            Imgproc.Canny(g8, ed, low.toDouble(), high.toDouble(), 3, true)
+            val edData = ByteArray(h * w)
+            ed.get(0, 0, edData)
+            for (i in base.indices) {
+                base[i] = base[i] && ((edData[i].toInt() and 0xFF) > 0)
+            }
+            ed.release()
+            g8.release()
+        }
+
         val ptsV = ArrayList<Pair<Double, Double>>()
         val ptsH = ArrayList<Pair<Double, Double>>()
         for (y in 0 until h) {
             for (x in 0 until w) {
                 val idx = y * w + x
-                if (mag[idx] < thr) continue
+                if (!base[idx]) continue
                 val a = abs(angT[idx].toDouble())
-                if (a <= angleWinH) ptsH.add(x.toDouble() to y.toDouble())
-                else if (abs(a - 90.0) <= angleWinV) ptsV.add(x.toDouble() to y.toDouble())
+                if (a <= angleWinH) {
+                    ptsH.add(x.toDouble() to y.toDouble())
+                } else if (abs(a - 90.0) <= angleWinV) {
+                    ptsV.add(x.toDouble() to y.toDouble())
+                }
             }
         }
-        return ptsV to ptsH
+
+        return downsamplePointsEven(ptsV, maxPoints) to downsamplePointsEven(ptsH, maxPoints)
     }
 }
