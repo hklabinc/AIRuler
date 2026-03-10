@@ -2006,10 +2006,17 @@ object FilmPointFinder {
         val refineResidualAbs = extractDouble(param, "refine_residual_abs", 0.35).coerceAtLeast(0.05)
         val refineResidualImprove = extractDouble(param, "refine_residual_improve", 0.90).coerceIn(0.1, 1.0)
         val refineAngleMaxDeg = extractDouble(param, "refine_angle_max_deg", 5.0).coerceAtLeast(0.0)
+        val junctionRefine = extractBoolean(param, "junction_refine", true)
+        val junctionMaxShift = extractDouble(param, "junction_max_shift", 1.75).coerceAtLeast(0.0)
+        val junctionRows = extractInt(param, "junction_rows", 7).coerceAtLeast(3)
+        val junctionCols = extractInt(param, "junction_cols", 7).coerceAtLeast(3)
+        val junctionProfileHalf = extractDouble(param, "junction_profile_half", 8.0).coerceAtLeast(3.0)
+        val junctionGuard = extractDouble(param, "junction_guard", 2.0).coerceAtLeast(0.5)
 
         // 1) gray linear 0..1
         val h = img.rows()
         val w = img.cols()
+        val centerPt = ((w - 1) / 2.0) to ((h - 1) / 2.0)
         val grayU8 = Mat()
         if (img.channels() == 1) img.copyTo(grayU8) else Imgproc.cvtColor(img, grayU8, Imgproc.COLOR_BGR2GRAY)
         val grayLin = srgbToLinear01MatU8(grayU8)
@@ -2715,6 +2722,142 @@ object FilmPointFinder {
                 baseL
             }
         }
+        fun profileStepXAtRow(y: Double, xSeed: Double, halfSpan: Double, pValue: Double): Double? {
+            if (y < 1.0 || y > h - 2.0) return null
+            val x0 = max(1.0, xSeed - halfSpan)
+            val x1 = min((w - 2).toDouble(), xSeed + halfSpan)
+            if (x1 - x0 < 2.0) return null
+
+            val step = 0.25
+            val count = max(3, floor((x1 - x0) / step).toInt() + 1)
+            val xs = DoubleArray(count)
+            val prof = FloatArray(count)
+            for (i in 0 until count) {
+                val x = min(x1, x0 + i * step)
+                xs[i] = x
+                prof[i] = bilinearSample(grayLin, x, y).toFloat()
+            }
+
+            val dark = percentileLinear(prof, qDark * 100.0)
+            val bright = percentileLinear(prof, qBright * 100.0)
+            if (bright - dark < 0.03) return null
+            val target = (1.0 - pValue) * dark + pValue * bright
+
+            var bestX: Double? = null
+            var bestDist = Double.POSITIVE_INFINITY
+            for (i in 0 until prof.size - 1) {
+                val a = prof[i].toDouble()
+                val b = prof[i + 1].toDouble()
+                val lo = min(a, b)
+                val hi = max(a, b)
+                if (target < lo || target > hi || abs(b - a) < 1e-6) continue
+                val frac = (target - a) / (b - a)
+                val xc = xs[i] + frac * (xs[i + 1] - xs[i])
+                val dist = abs(xc - xSeed)
+                if (dist < bestDist) {
+                    bestDist = dist
+                    bestX = xc
+                }
+            }
+            return bestX
+        }
+
+        fun profileStepYAtCol(x: Double, ySeed: Double, halfSpan: Double, pValue: Double): Double? {
+            if (x < 1.0 || x > w - 2.0) return null
+            val y0 = max(1.0, ySeed - halfSpan)
+            val y1 = min((h - 2).toDouble(), ySeed + halfSpan)
+            if (y1 - y0 < 2.0) return null
+
+            val step = 0.25
+            val count = max(3, floor((y1 - y0) / step).toInt() + 1)
+            val ys = DoubleArray(count)
+            val prof = FloatArray(count)
+            for (i in 0 until count) {
+                val yv = min(y1, y0 + i * step)
+                ys[i] = yv
+                prof[i] = bilinearSample(grayLin, x, yv).toFloat()
+            }
+
+            val dark = percentileLinear(prof, qDark * 100.0)
+            val bright = percentileLinear(prof, qBright * 100.0)
+            if (bright - dark < 0.03) return null
+            val target = (1.0 - pValue) * dark + pValue * bright
+
+            var bestY: Double? = null
+            var bestDist = Double.POSITIVE_INFINITY
+            for (i in 0 until prof.size - 1) {
+                val a = prof[i].toDouble()
+                val b = prof[i + 1].toDouble()
+                val lo = min(a, b)
+                val hi = max(a, b)
+                if (target < lo || target > hi || abs(b - a) < 1e-6) continue
+                val frac = (target - a) / (b - a)
+                val yc = ys[i] + frac * (ys[i + 1] - ys[i])
+                val dist = abs(yc - ySeed)
+                if (dist < bestDist) {
+                    bestDist = dist
+                    bestY = yc
+                }
+            }
+            return bestY
+        }
+
+        fun localMedian(values: List<Double>): Double? {
+            if (values.isEmpty()) return null
+            return median(values.toDoubleArray())
+        }
+
+        fun refineJunctionPoint(
+            coarsePt: Pair<Double, Double>,
+            LvBase: DoubleArray,
+            LhBase: DoubleArray,
+            pVert: Double,
+            pHoriz: Double
+        ): Pair<Double, Double>? {
+            val x0 = coarsePt.first
+            val y0 = coarsePt.second
+            val xCandidates = ArrayList<Double>()
+            val yCandidates = ArrayList<Double>()
+
+            val rowCount = max(3, junctionRows)
+            val colCount = max(3, junctionCols)
+            val rowStep = 0.8
+            val colStep = 0.8
+
+            for (k in 0 until rowCount) {
+                val off = (k - (rowCount - 1) / 2.0) * rowStep
+                val y = y0 + off - junctionGuard
+                val x = profileStepXAtRow(y, x0, junctionProfileHalf, pVert)
+                if (x != null && abs(x - x0) <= junctionMaxShift) xCandidates.add(x)
+            }
+
+            val testXs = ArrayList<Double>()
+            val medianX = localMedian(xCandidates)
+            if (medianX != null) testXs.add(medianX)
+            testXs.add(x0 - 4.0)
+            testXs.add(x0 + 4.0)
+
+            for (xProbe in testXs) {
+                if (xProbe < 1.0 || xProbe > w - 2.0) continue
+                for (k in 0 until colCount) {
+                    val off = (k - (colCount - 1) / 2.0) * colStep
+                    val x = xProbe + off
+                    if (x < 1.0 || x > w - 2.0) continue
+                    val y = profileStepYAtCol(x, y0, junctionProfileHalf, pHoriz)
+                    if (y != null && abs(y - y0) <= junctionMaxShift) yCandidates.add(y)
+                }
+            }
+
+            val rx = localMedian(xCandidates) ?: return null
+            val ry = localMedian(yCandidates) ?: return null
+            if (hypot(rx - x0, ry - y0) > junctionMaxShift) return null
+
+            val dxV = abs(pointLineDistance(LvBase, rx, y0))
+            val dyH = abs(pointLineDistance(LhBase, x0, ry))
+            if (dxV > junctionMaxShift * 1.2 || dyH > junctionMaxShift * 1.2) return null
+
+            return rx to ry
+        }
 
         val ptsV: List<Pair<Double, Double>>
         val ptsH: List<Pair<Double, Double>>
@@ -2783,7 +2926,6 @@ object FilmPointFinder {
             return null
         }
 
-        val centerPt = ((w - 1) / 2.0) to ((h - 1) / 2.0)
         val (Lv0, inV) = exactConsensusLine(
             points = ptsV,
             tol = ransacTol,
@@ -2842,6 +2984,19 @@ object FilmPointFinder {
         }
 
         var bestPt = pt0
+        if (junctionRefine) {
+            val junctionPt = refineJunctionPoint(
+                coarsePt = bestPt,
+                LvBase = Lv,
+                LhBase = Lh,
+                pVert = if (doPShift) pVertical else 0.5,
+                pHoriz = if (doPShift) pHorizontal else 0.5
+            )
+            if (junctionPt != null) {
+                bestPt = junctionPt
+            }
+        }
+
         if (refineLocal) {
             val vSideDistances = DoubleArray(inV.size) {
                 pointLineDistance(Lh, inV[it].first, inV[it].second)
@@ -2903,9 +3058,20 @@ object FilmPointFinder {
 
             val ptRef = intersectLines(LvRef, LhRef)
             if (ptRef != null) {
-                val shift = hypot(ptRef.first - pt0.first, ptRef.second - pt0.second)
+                var candidatePt = ptRef
+                if (junctionRefine) {
+                    val junctionPt2 = refineJunctionPoint(
+                        coarsePt = ptRef,
+                        LvBase = LvRef,
+                        LhBase = LhRef,
+                        pVert = refinePVertical,
+                        pHoriz = refinePHorizontal
+                    )
+                    if (junctionPt2 != null) candidatePt = junctionPt2
+                }
+                val shift = hypot(candidatePt.first - pt0.first, candidatePt.second - pt0.second)
                 if (shift <= refineMaxShift) {
-                    bestPt = ptRef
+                    bestPt = candidatePt
                 }
             }
         }
