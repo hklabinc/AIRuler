@@ -42,6 +42,8 @@ object GoodBadModelRules {
         "L2787-00" to 5,
         "L2789-00" to 5,
         "L2790-00" to 5,
+        "L2785-02" to 0,    // good/bad 없고 film만 존재
+        "L2791-02" to 0,    // good/bad 없고 film만 존재
 
         // ---- AIRuler 프리셋/현장 변형(동일 family의 revision 차이를 흡수하기 위한 alias) ----
         // ※ 값은 HkDetector의 동일 계열 모델을 기준으로 둡니다.

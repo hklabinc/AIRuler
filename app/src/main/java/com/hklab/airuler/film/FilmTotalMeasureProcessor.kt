@@ -116,6 +116,7 @@ object FilmTotalMeasureProcessor {
         val pixelsPerMmH: Double,
         val pixelsPerMmV: Double,
         val detectedRectsPx: List<Rect> = emptyList(),
+        val calibrationToastMessage: String? = null,
     )
 
     /**
@@ -1052,6 +1053,18 @@ object FilmTotalMeasureProcessor {
                 )
             }
 
+            // ✅ warm-up(첫 3회)은 "성공한 측정"만 반영해야 하므로,
+            //    이번 run이 warm-up 구간이면 offset 상태를 스냅샷으로 잡아 두었다가
+            //    최종 결과가 FAIL이면 sampleN/offset/window를 모두 rollback 합니다.
+            val warmupSampleNBeforeRun = if (calibrationEnabled && useOffset) {
+                GridOnlineOffsetCalibrationStore.getMaxSampleN(base)
+            } else 0
+            val warmupPhaseActive = calibrationEnabled && useOffset &&
+                warmupSampleNBeforeRun < GridOnlineOffsetCalibrationStore.WARMUP_SAMPLES
+            val warmupSnapshot = if (warmupPhaseActive) {
+                GridOnlineOffsetCalibrationStore.snapshotModel(base)
+            } else null
+
             // 2nd pass: 보정(applyAndUpdate) + 시각화/로그
             for (fb in filmBundles) {
                 val filmIdx = fb.filmIndex
@@ -1164,6 +1177,24 @@ object FilmTotalMeasureProcessor {
 
             logs.add("[Ruler 기반 필름 전체 길이 측정] 완료 (${SystemClock.elapsedRealtime() - t0} ms)")
 
+            val allPass = logs.none { line ->
+                line.contains("FAIL", ignoreCase = true) || line.contains("NG", ignoreCase = true)
+            }
+            var calibrationToastMessage: String? = null
+            if (warmupPhaseActive) {
+                if (allPass) {
+                    val warmupSampleNAfterRun = GridOnlineOffsetCalibrationStore.getMaxSampleN(base)
+                    if (warmupSampleNAfterRun > warmupSampleNBeforeRun) {
+                        calibrationToastMessage =
+                            "Calibration ${warmupSampleNAfterRun.coerceAtMost(GridOnlineOffsetCalibrationStore.WARMUP_SAMPLES)}/${GridOnlineOffsetCalibrationStore.WARMUP_SAMPLES} 완료"
+                    }
+                } else {
+                    warmupSnapshot?.let { GridOnlineOffsetCalibrationStore.restoreModel(it) }
+                    calibrationToastMessage = "실패: Offset에 반영되지 않습니다."
+                    logs.add("[Calibration] warm-up FAIL => rollback offset update / sample count")
+                }
+            }
+
             // ✅ (요구사항) Calibration ON일 때는 online으로 업데이트된 offset을
             //    모델 JSON(measure_*.offset)에 즉시 저장하여,
             //    앱 재시작/화면 전환 등에서도 값이 유지되게 합니다.
@@ -1199,7 +1230,8 @@ object FilmTotalMeasureProcessor {
                 detectedFilms = dets.size,
                 pixelsPerMmH = pxPerMmH,
                 pixelsPerMmV = pxPerMmV,
-                detectedRectsPx = detectedRectsPx
+                detectedRectsPx = detectedRectsPx,
+                calibrationToastMessage = calibrationToastMessage,
             )
 
 

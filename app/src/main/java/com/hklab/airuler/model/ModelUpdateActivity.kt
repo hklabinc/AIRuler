@@ -41,6 +41,8 @@ class ModelUpdateActivity : AppCompatActivity() {
         "M1892-00",
         "M1893-00",
         "M2379-00",
+        "L2785-02",
+        "L2791-02"
     )
 
     private enum class SortKey { NO, MODEL, SIZE, DATE, JSON }

@@ -234,7 +234,7 @@ class InferencePipeline(
     // -------- BadBox 시작 각도 게이트 --------
     private val ANGLE_NEAR_ZERO_DEG = 1.0
 
-    private val FILM_TILT_DY_THRESH = 1.5
+    private val FILM_TILT_DY_THRESH = 1.2
     private val FILM_TILT_OK_STREAK = 3
     private var filmTiltOkStreak: Int = 0
 
@@ -242,7 +242,7 @@ class InferencePipeline(
     // Samsung 카메라로 전환 후, 촬영 파일 감지가 실패하면(measuringNow=true 상태로 복귀)
     // 이후 측정이 다시 시작되지 않는 문제가 발생할 수 있습니다.
     // 사용자가 필름을 화면 밖으로 뺐다가 다시 넣을 때 자동으로 상태를 초기화해 재시작할 수 있게 합니다.
-    private val STUCK_MEASURE_EMPTY_STREAK_TO_RESET = 3
+    private val STUCK_MEASURE_EMPTY_STREAK_TO_RESET = 2
     private var stuckMeasureEmptyStreak: Int = 0
 
 

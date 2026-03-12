@@ -23,10 +23,10 @@ class MotionHandDetector(
     private val motionThreshold: Int = 1,   // score >= motionThreshold => motionExists
 
     // Hand ROI (bottom center)  ※ python main_detector의 ROI와 동일 계열
-    private val handRoiX1Ratio: Float = 0.25f,
-    private val handRoiX2Ratio: Float = 0.75f,
-    private val handRoiY1Ratio: Float = 0.80f,
-    private val handRoiY2Ratio: Float = 0.90f,
+    private val handRoiX1Ratio: Float = 0.2f,
+    private val handRoiX2Ratio: Float = 0.8f,
+    private val handRoiY1Ratio: Float = 0.97f,
+    private val handRoiY2Ratio: Float = 0.99f,
 
     // Hand detection = "dark pixel ratio" in ROI
     private val darkPixelThresh: Int = 110,     // gray < 110 을 "어두운 픽셀"로 간주

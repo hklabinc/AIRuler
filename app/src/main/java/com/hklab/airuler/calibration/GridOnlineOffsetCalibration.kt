@@ -56,6 +56,11 @@ class OnlineMedianOffsetCalibrator(
     private val cfg: OffsetCalibratorConfig,
     initialOffset: Double = 0.0,
 ) {
+    data class Snapshot(
+        val offset: Double,
+        val sampleN: Int,
+        val window: List<Double>,
+    )
     /** raw(mm)에 더해지는 보정값 */
     @Volatile
     var offset: Double = initialOffset
@@ -98,6 +103,24 @@ class OnlineMedianOffsetCalibrator(
     fun setOffset(value: Double) {
         offset = value
     }
+
+    fun snapshot(): Snapshot = Snapshot(
+        offset = offset,
+        sampleN = seenN,
+        window = window.toList(),
+    )
+
+    fun restore(snapshot: Snapshot) {
+        offset = snapshot.offset
+        seenN = snapshot.sampleN
+        window.clear()
+        snapshot.window.forEach { window.addLast(it) }
+    }
+
+    fun deepCopy(): OnlineMedianOffsetCalibrator =
+        OnlineMedianOffsetCalibrator(cfg = cfg, initialOffset = offset).also { copy ->
+            copy.restore(snapshot())
+        }
 
     /** 현재 누적된 샘플 시도 횟수(n). (warmup 판단/디버깅 용도) */
     fun getSampleN(): Int = seenN
@@ -241,6 +264,18 @@ class OnlineMedianOffsetCalibrator(
 object GridOnlineOffsetCalibrationStore {
 
     private const val TAG = "AIRulerOffset"
+    const val WARMUP_SAMPLES: Int = 3
+
+    internal data class ModelSnapshot(
+        val modelBase: String,
+        val calibrators: List<SnapshotEntry>,
+    )
+
+    internal data class SnapshotEntry(
+        val measureName: String,
+        val filmIndex: Int,
+        val calibrator: OnlineMedianOffsetCalibrator,
+    )
 
     private data class Key(val modelBase: String, val measureName: String, val filmIndex: Int)
 
@@ -308,7 +343,7 @@ object GridOnlineOffsetCalibrationStore {
                     cfg = OffsetCalibratorConfig(
                         referenceValue = ref,
                         margin = margin,
-                        warmupSamples = 3,
+                        warmupSamples = WARMUP_SAMPLES,
                         warmupAlpha = 1.0,
                         mainAlpha = 0.5,
                         windowSize = 30,
@@ -400,6 +435,52 @@ object GridOnlineOffsetCalibrationStore {
             if (cal != null) return cal.offset
         }
         return parseOffsetFromField(offsetFieldInJson, filmIndex)
+    }
+
+
+    /**
+     * 현재 모델에서 가장 앞선 calibrator의 sampleN을 반환합니다.
+     *
+     * 용도)
+     * - 모델 선택 직후 warm-up 진행 상황(0/3, 1/3, 2/3, 3/3)을
+     *   "이미지(run) 단위"로 안내할 때 사용합니다.
+     * - 일반적으로 한 run에서 모든 calibrator가 함께 진행되므로 max sampleN을 대표값으로 사용합니다.
+     */
+    fun getMaxSampleN(modelBase: String): Int {
+        synchronized(lock) {
+            return calibrators
+                .filterKeys { it.modelBase == modelBase }
+                .values
+                .maxOfOrNull { it.getSampleN() }
+                ?: 0
+        }
+    }
+
+    /** 현재 모델 calibrator 상태를 deep-copy 하여 저장합니다. */
+    internal fun snapshotModel(modelBase: String): ModelSnapshot {
+        synchronized(lock) {
+            val entries = calibrators
+                .filterKeys { it.modelBase == modelBase }
+                .map { (k, v) ->
+                    SnapshotEntry(
+                        measureName = k.measureName,
+                        filmIndex = k.filmIndex,
+                        calibrator = v.deepCopy(),
+                    )
+                }
+            return ModelSnapshot(modelBase = modelBase, calibrators = entries)
+        }
+    }
+
+    /** snapshotModel()로 저장한 상태를 그대로 복원합니다. */
+    internal fun restoreModel(snapshot: ModelSnapshot) {
+        synchronized(lock) {
+            calibrators.keys.removeAll { it.modelBase == snapshot.modelBase }
+            snapshot.calibrators.forEach { entry ->
+                calibrators[Key(snapshot.modelBase, entry.measureName, entry.filmIndex)] =
+                    entry.calibrator.deepCopy()
+            }
+        }
     }
 
     /** 현재 모델의 (measure -> (filmIndex -> offset)) 스냅샷 */

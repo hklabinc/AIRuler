@@ -332,8 +332,9 @@ class MeasurementPipeline(
             runCatching { if (!prev.isRecycled) prev.recycle() }
         }
 
-        // ✅ 최종 결과(FAIL/PASS) 화면에서만 재측정 버튼 노출
-        binding.layoutRetryResultButtons.visibility = if (dismissOnHand) View.VISIBLE else View.GONE
+        // ✅ 요청사항(2026-03): 결과 화면의 "50MP로 재측정 / 200MP로 재측정" 버튼은
+        //    기능은 남겨두되 UI에서는 항상 숨깁니다.
+        binding.layoutRetryResultButtons.visibility = View.GONE
 
         binding.capturedOverlay.visibility = View.VISIBLE
     }
@@ -625,6 +626,7 @@ class MeasurementPipeline(
 
                         // ✅ 결과 오버레이는 손 감지 시 자동으로 닫히게(최종 흐름일 때만)
                         showCapturedOverlay(previewBmp, dismissOnHand = shouldFinalize)
+                        res.calibrationToastMessage?.let { showToast(it) }
 
                         appendStatus(
                             "치수 분석 완료(Grid): films=${res.detectedFilms}, " +
@@ -884,6 +886,7 @@ class MeasurementPipeline(
 
                         // ✅ 결과 오버레이는 손 감지 시 자동으로 닫히게(최종 흐름일 때만)
                         showCapturedOverlay(previewBmp, dismissOnHand = shouldFinalize)
+                        res.calibrationToastMessage?.let { showToast(it) }
 
                         appendStatus(
                             "치수 분석 완료: films=${res.detectedFilms}, " +
