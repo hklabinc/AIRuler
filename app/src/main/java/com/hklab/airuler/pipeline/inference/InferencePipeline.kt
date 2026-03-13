@@ -234,7 +234,7 @@ class InferencePipeline(
     // -------- BadBox 시작 각도 게이트 --------
     private val ANGLE_NEAR_ZERO_DEG = 1.0
 
-    private val FILM_TILT_DY_THRESH = 1.2
+    private val FILM_TILT_DY_THRESH = 1.5
     private val FILM_TILT_OK_STREAK = 3
     private var filmTiltOkStreak: Int = 0
 
@@ -1814,12 +1814,26 @@ class InferencePipeline(
                     val filmCount = results.size
                     val goodCount = goodDetectionsRaw.size
                     val badCount = badDetectionsRaw.size
-                    val hasGood = goodCount > 0
-                    val hasBad = badCount > 0
+                    val isFilmOnlyModel = GoodBadModelRules.isFilmOnlyModel(modelCode)
 
-                    // PASS(all_good) 조건: (모델별 expected good 개수 만족) AND (bad 없음)
+                    // film-only 모델(L2785-02 / L2791-02)은 good/bad 라벨이 없으므로
+                    // good/bad 조건을 보지 않고, film 검출만으로 PASS 누적을 진행합니다.
+                    val hasBad = if (isFilmOnlyModel) false else (badCount > 0)
+                    val hasGood = if (isFilmOnlyModel) {
+                        filmCount > 0
+                    } else {
+                        goodCount > 0
+                    }
+
+                    // PASS(all_good) 조건
+                    // - 일반 모델: (모델별 expected good 개수 만족) AND (bad 없음)
+                    // - film-only 모델: film만 1개 이상 검출되면 good/bad 없이 통과 누적
                     val expectedGoodTotal = GoodBadModelRules.expectedGoodTotal(modelCode, filmCount)
-                    val allGood = (expectedGoodTotal != null) && (filmCount >= 1) && (goodCount == expectedGoodTotal) && !hasBad
+                    val allGood = if (isFilmOnlyModel) {
+                        filmCount >= 1
+                    } else {
+                        (expectedGoodTotal != null) && (filmCount >= 1) && (goodCount == expectedGoodTotal) && !hasBad
+                    }
 
                     // overlay + 최종 박스 색칠용: bad box가 포함된 film만 defect로 표시
                     val filmDefects = BooleanArray(filmCount) { false }

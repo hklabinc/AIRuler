@@ -102,4 +102,16 @@ object GoodBadModelRules {
 
         return null
     }
+
+    /**
+     * good/bad 라벨 없이 film만 존재하는 모델인지 여부.
+     *
+     * - 현재는 NUM_GOOD_PER_FILM == 0 으로 명시된 모델만 film-only 로 취급합니다.
+     * - family prefix 폴백은 의도적으로 사용하지 않아, 다른 모델/개정판에 영향이 없도록 합니다.
+     */
+    fun isFilmOnlyModel(modelName: String?): Boolean {
+        val key = normalizeModelKey(modelName)
+        if (key.isEmpty()) return false
+        return NUM_GOOD_PER_FILM[key] == 0
+    }
 }
