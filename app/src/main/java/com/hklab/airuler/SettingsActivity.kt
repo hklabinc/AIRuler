@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.os.Bundle
 import android.widget.ArrayAdapter
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.hklab.airuler.databinding.ActivitySettingsBinding
 import androidx.activity.addCallback
@@ -227,6 +228,15 @@ class SettingsActivity : AppCompatActivity() {
         }
         updateMethodLockByMp()
 
+        // ✅ Ruler 기반 선택 시 사용 방법 안내 Toast 표시
+        // - 초기값 세팅 중에는 표시하지 않기 위해, 초기 checked 상태 반영 이후에 리스너를 연결합니다.
+        // - 200MP 선택으로 RULER가 강제되는 경우에도 동일 안내가 한 번 표시됩니다.
+        binding.rgMeasureMethod.setOnCheckedChangeListener { _, checkedId ->
+            if (checkedId == binding.rbMethodRuler.id) {
+                showRulerMethodGuideToast()
+            }
+        }
+
         binding.rgCaptureMp.setOnCheckedChangeListener { _, _ ->
             updateMethodLockByMp()
         }
@@ -270,6 +280,10 @@ class SettingsActivity : AppCompatActivity() {
         binding.btnApply.setOnClickListener {
             applyAndFinish()
         }
+    }
+
+    private fun showRulerMethodGuideToast() {
+        Toast.makeText(this, "필름 왼쪽에 세로 자를 배치해야 합니다.", Toast.LENGTH_SHORT).show()
     }
 
     private fun applyAndFinish() {
