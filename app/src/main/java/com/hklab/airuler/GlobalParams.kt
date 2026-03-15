@@ -10,6 +10,13 @@ object GlobalParams {
     @Volatile var DEBUG: Boolean = false     // 로그 필터 키워드: ReturnWatcher/AutoReturn/InferencePipeline/FilmTotalMeasureGrid/[ruler]
     @Volatile var LOG_FILE_SAVE: Boolean = true  // true일 때만 내부 로그 파일 저장(옵션)
 
+    /**
+     * 모델 선택 화면 진입 시 저장공간 사용률 경고 기준(%).
+     * - 예: 80 이면 내부 저장공간을 80% 이상 사용 중일 때 토스트를 표시합니다.
+     * - 사용자가 필요 시 여기 값만 조정하면 됩니다.
+     */
+    @Volatile var STORAGE_USAGE_WARNING_THRESHOLD_PERCENT: Int = 80
+
     // ---------------------------------------------------------------------
     // ✅ YesunAI server (AIRuler 연동)
     //  - 서버 주소는 여기에서만 바꿀 수 있도록 단일화합니다.
@@ -22,7 +29,7 @@ object GlobalParams {
      * - 개발자가 필요 시 여기 값만 수정하면 됩니다.
      * - UI 표기는 "모델을 선택해주세요. <SW_VERSION>" / "Version: <SW_VERSION>" 형태로 사용합니다.
      */
-    const val SW_VERSION: String = "v.26.0315"
+    const val SW_VERSION: String = "v.26.0316"
 
     /**
      * YESUNAI_BASE_URL + "/" + path 를 안전하게 합칩니다.

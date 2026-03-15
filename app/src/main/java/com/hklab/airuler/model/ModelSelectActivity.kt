@@ -15,6 +15,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.os.StatFs
 import android.provider.Settings
 import android.util.DisplayMetrics
 import android.util.Log
@@ -194,6 +195,7 @@ class ModelSelectActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refresh()
+        maybeShowStorageUsageWarning()
     }
 
     override fun onDestroy() {
@@ -807,6 +809,40 @@ class ModelSelectActivity : AppCompatActivity() {
         swDlgStatus = null
         swDlgPct = null
         swDlgProgress = null
+    }
+
+    // ---------------- Storage usage warning ----------------
+
+    private fun maybeShowStorageUsageWarning() {
+        runCatching {
+            val usedPercent = currentPrimaryStorageUsedPercent() ?: return@runCatching
+            val threshold = GlobalParams.STORAGE_USAGE_WARNING_THRESHOLD_PERCENT.coerceIn(1, 100)
+            if (usedPercent >= threshold.toDouble()) {
+                toast(
+                    "현재 저장공간 ${usedPercent.toInt()}%를 사용중입니다. 오래된 파일을 지워 공간을 확보해주세요"
+                )
+            }
+        }.onFailure { e ->
+            AirulerFileLogger.w(TAG, "Storage usage warning check failed: ${e.message}")
+        }
+    }
+
+    /**
+     * 앱 결과가 저장되는 기본 내부 저장공간(Primary shared storage) 사용률(%)을 반환합니다.
+     * - 외부 전용 경로(getExternalFilesDir)를 우선 사용하고, 불가 시 filesDir 로 fallback 합니다.
+     * - 반환값은 실제 비율(Double)이며, 토스트 표기는 정수부만 사용합니다.
+     */
+    private fun currentPrimaryStorageUsedPercent(): Double? {
+        val statPath = getExternalFilesDir(null)?.absolutePath
+            ?: filesDir.absolutePath
+
+        val stat = StatFs(statPath)
+        val totalBytes = stat.totalBytes
+        val availableBytes = stat.availableBytes
+        if (totalBytes <= 0L) return null
+
+        val usedBytes = (totalBytes - availableBytes).coerceAtLeast(0L)
+        return (usedBytes.toDouble() * 100.0) / totalBytes.toDouble()
     }
 
     private fun formatEpochMs(ms: Long): String {
