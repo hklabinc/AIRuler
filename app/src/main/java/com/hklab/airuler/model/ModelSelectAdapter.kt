@@ -50,6 +50,16 @@ class ModelSelectAdapter(
         val name = item.name
         txtName.text = name
 
+        // ✅ M2379-00만 가로 크기를 타일 폭에 맞춰 축소해서 전체 이미지가 보이도록 처리
+        // - 기존 기본값(centerCrop)은 다른 모델에 그대로 유지
+        // - RecyclerView 재사용으로 이전 scaleType 이 남지 않도록 매 바인딩 시 명시적으로 재설정
+        val baseName = name.trim().substringBefore("_FO")
+        img.scaleType = if (baseName.equals("M2379-00", ignoreCase = true)) {
+            ImageView.ScaleType.FIT_XY
+        } else {
+            ImageView.ScaleType.CENTER_CROP
+        }
+
         // ✅ 아이콘 로딩: assets/overlay/<name>.jpg (또는 jpeg/png)
         val uri = ModelFileStore.overlayAssetUriOrNull(ctx, name)
         if (uri != null) {
