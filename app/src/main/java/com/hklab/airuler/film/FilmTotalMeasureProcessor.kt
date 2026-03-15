@@ -1142,20 +1142,22 @@ object FilmTotalMeasureProcessor {
                     )
 
                     // 시각화
-                    Imgproc.rectangle(
-                        out,
-                        Point(r1[0].toDouble(), r1[1].toDouble()),
-                        Point(r1[2].toDouble(), r1[3].toDouble()),
-                        visColor,
-                        1
-                    )
-                    Imgproc.rectangle(
-                        out,
-                        Point(r2[0].toDouble(), r2[1].toDouble()),
-                        Point(r2[2].toDouble(), r2[3].toDouble()),
-                        visColor,
-                        1
-                    )
+                    if (GlobalParams.DEBUG) {
+                        Imgproc.rectangle(
+                            out,
+                            Point(r1[0].toDouble(), r1[1].toDouble()),
+                            Point(r1[2].toDouble(), r1[3].toDouble()),
+                            visColor,
+                            1
+                        )
+                        Imgproc.rectangle(
+                            out,
+                            Point(r2[0].toDouble(), r2[1].toDouble()),
+                            Point(r2[2].toDouble(), r2[3].toDouble()),
+                            visColor,
+                            1
+                        )
+                    }
                     Imgproc.circle(out, Point(p1.first, p1.second), 3, visColor, -1)
                     Imgproc.circle(out, Point(p2.first, p2.second), 3, visColor, -1)
                     Imgproc.line(out, Point(p1.first, p1.second), Point(p2.first, p2.second), visColor, 2)
