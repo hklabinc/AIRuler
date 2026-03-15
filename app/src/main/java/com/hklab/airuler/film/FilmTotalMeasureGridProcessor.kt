@@ -156,8 +156,26 @@ object FilmTotalMeasureGridProcessor {
      */
     private data class FilmCalcBundle(
         val filmIndex: Int,
+        val rawFilmBBox: IntArray,
+        val usedFilmBBox: IntArray,
         val calcs: List<MeasureCalc>,
         val hasOutlier: Boolean,
+    )
+
+    private data class CornerRoiDebugItem(
+        val key: String,
+        val roiRectAbs: IntArray,
+        val pointAbs: Pair<Double, Double>?,
+    )
+
+    private data class CornerCompositeDebugPoint(
+        val name: String,
+        val pointAbs: Pair<Double, Double>,
+    )
+
+    private data class CornerDebugOverlayData(
+        val roiItems: List<CornerRoiDebugItem>,
+        val cornerPoints: List<CornerCompositeDebugPoint>,
     )
 
 
@@ -662,6 +680,8 @@ object FilmTotalMeasureGridProcessor {
                     filmBundles.add(
                         FilmCalcBundle(
                             filmIndex = filmIndex,
+                            rawFilmBBox = rawFilmBBox.copyOf(),
+                            usedFilmBBox = usedFilmBBox.copyOf(),
                             calcs = calcs,
                             hasOutlier = filmHasOutlier,
                         )
@@ -697,6 +717,8 @@ object FilmTotalMeasureGridProcessor {
             // 2nd pass: 보정(applyAndUpdate) + 시각화/로그
             for (fb in filmBundles) {
                 val filmIdx = fb.filmIndex
+                val rawFilmBBox = fb.rawFilmBBox
+                val usedFilmBBox = fb.usedFilmBBox
 
                 for (c in fb.calcs) {
                     val m = c.m
@@ -812,6 +834,30 @@ object FilmTotalMeasureGridProcessor {
                         thick,
                         Imgproc.LINE_AA
                     )
+                }
+
+                if (GlobalParams.DEBUG) {
+                    runCatching {
+                        val cornerData = buildCornerDebugOverlayDataOrNull(
+                            imgBgr = img,
+                            rawFilmBBox = rawFilmBBox,
+                            rois = rois,
+                            tflitePadPx = GlobalParams.MEASURE_TFLITE_PAD_PX,
+                        )
+                        if (cornerData != null) {
+                            drawMeasureCornerDebugOverlay(
+                                overlay = out,
+                                filmIndex = filmIdx,
+                                rawFilmBBox = rawFilmBBox,
+                                usedFilmBBox = usedFilmBBox,
+                                cornerData = cornerData,
+                            )
+                        }
+                    }.onFailure { e ->
+                        if (GlobalParams.DEBUG) {
+                            Log.w(TAG, "[DBG][Film#${filmIdx}] measure corner debug overlay failed: ${e.message}", e)
+                        }
+                    }
                 }
             }
 
@@ -1020,6 +1066,238 @@ object FilmTotalMeasureGridProcessor {
         "roi_BR_H", "roi_BR_V",
         "roi_BL_H", "roi_BL_V"
     )
+
+    private fun computeFilmRoiRectAbs(
+        filmCrop: Mat,
+        filmBBox: IntArray,
+        roiCfg: RoiCfg,
+    ): IntArray {
+        val fx1 = filmBBox[0]
+        val fy1 = filmBBox[1]
+        val eh = filmCrop.rows().coerceAtLeast(1)
+        val ew = filmCrop.cols().coerceAtLeast(1)
+
+        var x = PyMath.roundHalfEvenInt(ew.toDouble() * roiCfg.x)
+        var y = PyMath.roundHalfEvenInt(eh.toDouble() * roiCfg.y)
+        var w = PyMath.roundHalfEvenInt(ew.toDouble() * roiCfg.w)
+        var h = PyMath.roundHalfEvenInt(eh.toDouble() * roiCfg.h)
+
+        x = x.coerceIn(0, ew - 1)
+        y = y.coerceIn(0, eh - 1)
+        w = w.coerceIn(1, ew - x)
+        h = h.coerceIn(1, eh - y)
+
+        return intArrayOf(fx1 + x, fy1 + y, fx1 + x + w, fy1 + y + h)
+    }
+
+    private fun buildCornerDebugOverlayDataOrNull(
+        imgBgr: Mat,
+        rawFilmBBox: IntArray,
+        rois: Map<String, RoiCfg>,
+        tflitePadPx: Int,
+    ): CornerDebugOverlayData? {
+        if (rawFilmBBox.size < 4) return null
+
+        val imgW = imgBgr.cols()
+        val imgH = imgBgr.rows()
+        if (imgW <= 0 || imgH <= 0) return null
+
+        var x1 = rawFilmBBox[0]
+        var y1 = rawFilmBBox[1]
+        var x2 = rawFilmBBox[2]
+        var y2 = rawFilmBBox[3]
+        if (x2 <= x1 || y2 <= y1) return null
+
+        val tpad = tflitePadPx.coerceAtLeast(0)
+        x1 = (x1 - tpad).coerceIn(0, imgW - 1)
+        y1 = (y1 - tpad).coerceIn(0, imgH - 1)
+        x2 = (x2 + tpad).coerceIn(x1 + 1, imgW)
+        y2 = (y2 + tpad).coerceIn(y1 + 1, imgH)
+
+        val paddedBBox = intArrayOf(x1, y1, x2, y2)
+        val filmCrop = imgBgr.submat(y1, y2, x1, x2)
+        try {
+            val roiItems = ArrayList<CornerRoiDebugItem>(MEASURE_CORNER_ROI_KEYS.size)
+            val pointMap = LinkedHashMap<String, Pair<Double, Double>?>(MEASURE_CORNER_ROI_KEYS.size)
+
+            for (key in MEASURE_CORNER_ROI_KEYS) {
+                val roiCfg = rois[key] ?: continue
+                val roiRectAbs = computeFilmRoiRectAbs(filmCrop, paddedBBox, roiCfg)
+                val pointAbs = runCatching {
+                    filmRoiCfgToAbsPoint(filmCrop, paddedBBox, roiCfg).first
+                }.getOrNull()
+                roiItems.add(
+                    CornerRoiDebugItem(
+                        key = key,
+                        roiRectAbs = roiRectAbs,
+                        pointAbs = pointAbs,
+                    )
+                )
+                pointMap[key] = pointAbs
+            }
+
+            fun composeCorner(name: String, hKey: String, vKey: String): CornerCompositeDebugPoint? {
+                val hPt = pointMap[hKey] ?: return null
+                val vPt = pointMap[vKey] ?: return null
+                return CornerCompositeDebugPoint(
+                    name = name,
+                    pointAbs = Pair(vPt.first, hPt.second)
+                )
+            }
+
+            val corners = listOfNotNull(
+                composeCorner("TL", "roi_TL_H", "roi_TL_V"),
+                composeCorner("TR", "roi_TR_H", "roi_TR_V"),
+                composeCorner("BR", "roi_BR_H", "roi_BR_V"),
+                composeCorner("BL", "roi_BL_H", "roi_BL_V"),
+            )
+
+            return CornerDebugOverlayData(
+                roiItems = roiItems,
+                cornerPoints = corners,
+            )
+        } finally {
+            filmCrop.release()
+        }
+    }
+
+    private fun cornerGroupColor(keyOrName: String): Scalar {
+        val upper = keyOrName.uppercase(Locale.US)
+        return when {
+            upper.contains("TL") -> Scalar(255.0, 0.0, 255.0)
+            upper.contains("TR") -> Scalar(255.0, 0.0, 255.0)
+            upper.contains("BR") -> Scalar(255.0, 0.0, 255.0)
+            upper.contains("BL") -> Scalar(255.0, 0.0, 255.0)
+            else -> Scalar(255.0, 255.0, 255.0)
+        }
+    }
+
+    private fun drawDebugMarker(
+        overlay: Mat,
+        x: Double,
+        y: Double,
+        color: Scalar,
+        radius: Int,
+        thickness: Int,
+    ) {
+        val r = radius.toDouble()
+        Imgproc.circle(overlay, Point(x, y), radius, color, thickness, Imgproc.LINE_AA)
+        Imgproc.line(overlay, Point(x - r, y), Point(x + r, y), color, thickness, Imgproc.LINE_AA)
+        Imgproc.line(overlay, Point(x, y - r), Point(x, y + r), color, thickness, Imgproc.LINE_AA)
+    }
+
+    private fun drawLabeledRect(
+        overlay: Mat,
+        rect: IntArray,
+        color: Scalar,
+        label: String,
+        thickness: Int,
+        labelYOffset: Int = 0,
+    ) {
+        if (rect.size < 4) return
+        Imgproc.rectangle(
+            overlay,
+            Point(rect[0].toDouble(), rect[1].toDouble()),
+            Point(rect[2].toDouble(), rect[3].toDouble()),
+            color,
+            thickness,
+            Imgproc.LINE_AA
+        )
+        val textX = (rect[0] + 4).toDouble()
+        val textY = max(16.0, rect[1].toDouble() - 6.0 + labelYOffset.toDouble())
+        Imgproc.putText(
+            overlay,
+            label,
+            Point(textX, textY),
+            Imgproc.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            color,
+            1,
+            Imgproc.LINE_AA
+        )
+    }
+
+    private fun drawMeasureCornerDebugOverlay(
+        overlay: Mat,
+        filmIndex: Int,
+        rawFilmBBox: IntArray,
+        usedFilmBBox: IntArray,
+        cornerData: CornerDebugOverlayData,
+    ) {
+        drawLabeledRect(
+            overlay = overlay,
+            rect = rawFilmBBox,
+            color = Scalar(255.0, 255.0, 255.0),
+            label = "F#${filmIndex} rawBBox",
+            thickness = 2,
+            labelYOffset = 0,
+        )
+        drawLabeledRect(
+            overlay = overlay,
+            rect = usedFilmBBox,
+            color = Scalar(0.0, 255.0, 255.0),
+            label = "F#${filmIndex} usedBBox",
+            thickness = 2,
+            labelYOffset = 14,
+        )
+
+        for (item in cornerData.roiItems) {
+            val color = cornerGroupColor(item.key)
+            val shortKey = item.key.removePrefix("roi_")
+            drawLabeledRect(
+                overlay = overlay,
+                rect = item.roiRectAbs,
+                color = color,
+                label = shortKey,
+                thickness = 1,
+            )
+
+            val pt = item.pointAbs
+            if (pt != null) {
+                drawDebugMarker(
+                    overlay = overlay,
+                    x = pt.first,
+                    y = pt.second,
+                    color = color,
+                    radius = 5,
+                    thickness = 1,
+                )
+            } else {
+                Imgproc.putText(
+                    overlay,
+                    "MISS",
+                    Point(item.roiRectAbs[0].toDouble() + 4.0, item.roiRectAbs[3].toDouble() - 4.0),
+                    Imgproc.FONT_HERSHEY_SIMPLEX,
+                    0.45,
+                    Scalar(0.0, 0.0, 255.0),
+                    1,
+                    Imgproc.LINE_AA
+                )
+            }
+        }
+
+        for (corner in cornerData.cornerPoints) {
+            val color = cornerGroupColor(corner.name)
+            drawDebugMarker(
+                overlay = overlay,
+                x = corner.pointAbs.first,
+                y = corner.pointAbs.second,
+                color = color,
+                radius = 8,
+                thickness = 2,
+            )
+            Imgproc.putText(
+                overlay,
+                corner.name,
+                Point(corner.pointAbs.first + 6.0, corner.pointAbs.second - 6.0),
+                Imgproc.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                color,
+                2,
+                Imgproc.LINE_AA
+            )
+        }
+    }
 
     /**
      * 치수 측정용 CV ROI 계산 (python: main_tflite_json_roi_v2.py 의 corner box 로직과 동일)

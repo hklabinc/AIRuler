@@ -1998,7 +1998,7 @@ object FilmPointFinder {
         val sideLockVertical = extractString(param, "side_lock_vertical", "none")
         val sideLockHorizontal = extractString(param, "side_lock_horizontal", "none")
 
-        val refineLocal = extractBoolean(param, "refine_local", true)
+        val refineLocal = extractBoolean(param, "refine_local", false)
         val refineMaxShift = extractDouble(param, "refine_max_shift", 2.5).coerceAtLeast(0.0)
         val refineKeepMargin = extractDouble(param, "refine_keep_margin", 4.0).coerceAtLeast(0.0)
         val refineAnchorCountV = extractInt(param, "refine_anchor_count_v", 60).coerceAtLeast(12)

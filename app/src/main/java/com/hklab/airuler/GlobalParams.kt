@@ -10,7 +10,6 @@ object GlobalParams {
     @Volatile var DEBUG: Boolean = false     // 로그 필터 키워드: ReturnWatcher/AutoReturn/InferencePipeline/FilmTotalMeasureGrid/[ruler]
     @Volatile var LOG_FILE_SAVE: Boolean = true  // true일 때만 내부 로그 파일 저장(옵션)
 
-
     // ---------------------------------------------------------------------
     // ✅ YesunAI server (AIRuler 연동)
     //  - 서버 주소는 여기에서만 바꿀 수 있도록 단일화합니다.
@@ -23,7 +22,7 @@ object GlobalParams {
      * - 개발자가 필요 시 여기 값만 수정하면 됩니다.
      * - UI 표기는 "모델을 선택해주세요. <SW_VERSION>" / "Version: <SW_VERSION>" 형태로 사용합니다.
      */
-    const val SW_VERSION: String = "v.26.0313"
+    const val SW_VERSION: String = "v.26.0315"
 
     /**
      * YESUNAI_BASE_URL + "/" + path 를 안전하게 합칩니다.
