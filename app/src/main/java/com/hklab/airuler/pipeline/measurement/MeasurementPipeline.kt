@@ -1,8 +1,7 @@
 package com.hklab.airuler.pipeline.measurement
 
-import android.animation.ObjectAnimator
-import android.animation.ValueAnimator
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -12,7 +11,6 @@ import android.provider.Settings
 import android.util.Log
 import android.util.Size
 import android.view.View
-import android.view.animation.LinearInterpolator
 import androidx.appcompat.app.AppCompatActivity
 import androidx.exifinterface.media.ExifInterface
 import com.hklab.airuler.R
@@ -142,7 +140,6 @@ class MeasurementPipeline(
     @Volatile private var calibrationBannerVisible: Boolean = false
     @Volatile private var calibrationBannerHideOnNextFilmDetected: Boolean = false
     @Volatile private var calibrationBannerAwaitingPreviewClear: Boolean = false
-    private var calibrationBannerBlinkAnimator: ObjectAnimator? = null
     private val calibrationProgressRegex =
         Regex("""Calibration\s*(\d+)\s*/\s*(\d+)\s*완료""", RegexOption.IGNORE_CASE)
 
@@ -385,7 +382,6 @@ class MeasurementPipeline(
     }
 
     private fun clearCalibrationBannerInternal() {
-        stopCalibrationBannerBlink()
         calibrationBannerCompletedCount = 0
         calibrationBannerVisible = false
         calibrationBannerHideOnNextFilmDetected = false
@@ -393,6 +389,7 @@ class MeasurementPipeline(
         binding.txtCalibrationBanner.text = ""
         binding.txtCalibrationBanner.visibility = View.GONE
         binding.txtCalibrationBanner.alpha = 1f
+        binding.txtCalibrationBanner.setTextColor(Color.parseColor("#E53935"))
     }
 
     fun refreshCalibrationBannerForCurrentState() {
@@ -511,36 +508,9 @@ class MeasurementPipeline(
             append(if (failed) "보정 실패 " else "보정중 ")
             append("(${completedCount}/${totalCount})")
         }
-        binding.txtCalibrationBanner.visibility = View.VISIBLE
-
-        if (failed) {
-            stopCalibrationBannerBlink()
-        } else {
-            startCalibrationBannerBlink()
-        }
-    }
-
-    private fun startCalibrationBannerBlink() {
-        stopCalibrationBannerBlink()
-
-        calibrationBannerBlinkAnimator = ObjectAnimator.ofFloat(
-            binding.txtCalibrationBanner,
-            View.ALPHA,
-            1f,
-            0.25f,
-        ).apply {
-            duration = 650L
-            repeatCount = ValueAnimator.INFINITE
-            repeatMode = ValueAnimator.REVERSE
-            interpolator = LinearInterpolator()
-            start()
-        }
-    }
-
-    private fun stopCalibrationBannerBlink() {
-        calibrationBannerBlinkAnimator?.cancel()
-        calibrationBannerBlinkAnimator = null
         binding.txtCalibrationBanner.alpha = 1f
+        binding.txtCalibrationBanner.setTextColor(Color.parseColor("#E53935"))
+        binding.txtCalibrationBanner.visibility = View.VISIBLE
     }
 
     /** 삼성 카메라 복귀 Uri 처리(프리뷰 표시 + 측정 + 저장) */

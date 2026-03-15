@@ -119,7 +119,7 @@ class AutoReturnManager(
         else activity.startService(svc)
 
         activity.startActivity(Intent(activity, SamsungCameraProxyActivity::class.java))
-        appendStatus("삼성 카메라 실행: 프로 모드로 촬영 후 자동 복귀합니다. (저장은 DCIM/Camera)")
+        // appendStatus("삼성 카메라 실행: 프로 모드로 촬영 후 자동 복귀합니다. (저장은 DCIM/Camera)")
     }
 
     private fun launchExpertRaw() {
@@ -136,7 +136,7 @@ class AutoReturnManager(
         else activity.startService(svc)
 
         activity.startActivity(Intent(activity, ExpertRawProxyActivity::class.java))
-        appendStatus("Expert RAW 실행: 200MP로 촬영 후 자동 복귀합니다. (저장은 DCIM/Expert RAW)")
+        // appendStatus("Expert RAW 실행: 200MP로 촬영 후 자동 복귀합니다. (저장은 DCIM/Expert RAW)")
     }
 
     fun consumePendingSamsungCapture(intent: Intent?) {
