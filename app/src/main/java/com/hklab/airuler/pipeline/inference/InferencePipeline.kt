@@ -83,6 +83,7 @@ class InferencePipeline(
     private val showToast: (String) -> Unit,
     private val isGridModelSelected: () -> Boolean,
     private val getSelectedModelName: () -> String?,
+    private val onPreviewFilmDetected: (Boolean) -> Unit,
     private val requestSamsungCapture: () -> Unit,
     private val hideCapturedOverlay: () -> Unit,
     private val updatePreviewPauseUi: () -> Unit,
@@ -271,6 +272,7 @@ class InferencePipeline(
     // Film CV ROI(8개 roi_TL/TR/BR/BL_* ) prerequisite
     @Volatile private var filmCornerPrereqOk: Boolean = true
     @Volatile private var filmCornerPrereqToastShown: Boolean = false
+    private var lastPreviewFilmPresenceForCalibrationBanner: Boolean? = null
 
     // Ref image missing toast (중복 노출 방지)
 
@@ -328,7 +330,7 @@ class InferencePipeline(
         goodBadDecisionEngine.reset()
         filmTracker.reset()
         lastDetectionsForDirection = emptyList()
-
+        lastPreviewFilmPresenceForCalibrationBanner = null
 
         // Grid 게이팅 상태 초기화
         gridAngleOkStreak = 0
@@ -1232,6 +1234,7 @@ class InferencePipeline(
     fun hideArrows() {
         binding.imgLeftArrow.visibility = View.GONE
         binding.imgRightArrow.visibility = View.GONE
+        lastPreviewFilmPresenceForCalibrationBanner = null
 
         clearDecisionMoveTracking()
         suppressTiltAngleDiffBadBoxDuringMove = false
@@ -1259,6 +1262,7 @@ class InferencePipeline(
         goodBadDecisionEngine.reset()
         filmTracker.reset()
         lastDetectionsForDirection = emptyList()
+        lastPreviewFilmPresenceForCalibrationBanner = null
 
         filmTiltOkStreak = 0
 
@@ -1724,6 +1728,11 @@ class InferencePipeline(
 
                 // ✅ YOLO 박스 순서를 “위(좌→우) + 아래(좌→우)”로 안정화 (필름 박스 기준)
                 val results = sortDetectionsForBoxIndex(filmDetectionsRaw)
+                val hasFilmInPreview = results.isNotEmpty()
+                if (lastPreviewFilmPresenceForCalibrationBanner != hasFilmInPreview) {
+                    lastPreviewFilmPresenceForCalibrationBanner = hasFilmInPreview
+                    onPreviewFilmDetected(hasFilmInPreview)
+                }
 
                 // 방향 판단용(최신 YOLO 결과 유무)
                 lastDetectionsForDirection = results

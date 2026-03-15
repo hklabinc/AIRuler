@@ -138,9 +138,10 @@ class MeasurementPipeline(
     private var lastCapturedOverlayBitmap: Bitmap? = null
 
     // ✅ Calibration warm-up 진행 배너
-    private var calibrationBannerCompletedCount: Int = 0
-    private var calibrationBannerVisible: Boolean = false
-    private var calibrationBannerHideOnNextMeasurement: Boolean = false
+    @Volatile private var calibrationBannerCompletedCount: Int = 0
+    @Volatile private var calibrationBannerVisible: Boolean = false
+    @Volatile private var calibrationBannerHideOnNextFilmDetected: Boolean = false
+    @Volatile private var calibrationBannerAwaitingPreviewClear: Boolean = false
     private var calibrationBannerBlinkAnimator: ObjectAnimator? = null
     private val calibrationProgressRegex =
         Regex("""Calibration\s*(\d+)\s*/\s*(\d+)\s*완료""", RegexOption.IGNORE_CASE)
@@ -387,10 +388,69 @@ class MeasurementPipeline(
         stopCalibrationBannerBlink()
         calibrationBannerCompletedCount = 0
         calibrationBannerVisible = false
-        calibrationBannerHideOnNextMeasurement = false
+        calibrationBannerHideOnNextFilmDetected = false
+        calibrationBannerAwaitingPreviewClear = false
         binding.txtCalibrationBanner.text = ""
         binding.txtCalibrationBanner.visibility = View.GONE
         binding.txtCalibrationBanner.alpha = 1f
+    }
+
+    fun refreshCalibrationBannerForCurrentState() {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            refreshCalibrationBannerForCurrentStateInternal()
+        } else {
+            activity.runOnUiThread { refreshCalibrationBannerForCurrentStateInternal() }
+        }
+    }
+
+    fun onPreviewFilmDetected(hasFilm: Boolean) {
+        if (!calibrationBannerHideOnNextFilmDetected || !calibrationBannerVisible) return
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            handlePreviewFilmDetectedInternal(hasFilm)
+        } else {
+            activity.runOnUiThread { handlePreviewFilmDetectedInternal(hasFilm) }
+        }
+    }
+
+    private fun refreshCalibrationBannerForCurrentStateInternal() {
+        if (!AppSessionSettings.gridCalibrationEnabled) {
+            clearCalibrationBannerInternal()
+            return
+        }
+
+        val totalCount = GridOnlineOffsetCalibrationStore.WARMUP_SAMPLES
+        val completedCount = currentCalibrationCompletedCount().coerceIn(0, totalCount)
+
+        if (completedCount >= totalCount) {
+            if (calibrationBannerHideOnNextFilmDetected && calibrationBannerVisible) {
+                showCalibrationBanner(completedCount = completedCount, totalCount = totalCount, failed = false)
+            } else {
+                clearCalibrationBannerInternal()
+            }
+            return
+        }
+
+        calibrationBannerHideOnNextFilmDetected = false
+        calibrationBannerAwaitingPreviewClear = false
+        showCalibrationBanner(completedCount = completedCount, totalCount = totalCount, failed = false)
+    }
+
+    private fun handlePreviewFilmDetectedInternal(hasFilm: Boolean) {
+        if (!AppSessionSettings.gridCalibrationEnabled) return
+        if (state.capturedOverlayVisible) return
+        if (state.measuringNow) return
+        if (!calibrationBannerHideOnNextFilmDetected || !calibrationBannerVisible) return
+
+        if (calibrationBannerAwaitingPreviewClear) {
+            if (!hasFilm) {
+                calibrationBannerAwaitingPreviewClear = false
+            }
+            return
+        }
+
+        if (hasFilm) {
+            clearCalibrationBannerInternal()
+        }
     }
 
     private fun handleCalibrationBannerAfterMeasurement(calibrationToastMessage: String?) {
@@ -410,18 +470,20 @@ class MeasurementPipeline(
                     ?.coerceIn(0, totalCount)
                     ?: 0
                 showCalibrationBanner(completedCount = completedCount, totalCount = totalCount, failed = false)
-                calibrationBannerHideOnNextMeasurement = completedCount >= totalCount
+                calibrationBannerHideOnNextFilmDetected = completedCount >= totalCount
+                calibrationBannerAwaitingPreviewClear = completedCount >= totalCount
             }
 
             !calibrationToastMessage.isNullOrBlank() &&
                 calibrationToastMessage.contains("실패", ignoreCase = true) -> {
                 val completedCount = currentCalibrationCompletedCount().coerceIn(0, totalCount)
                 showCalibrationBanner(completedCount = completedCount, totalCount = totalCount, failed = true)
-                calibrationBannerHideOnNextMeasurement = completedCount >= totalCount
+                calibrationBannerHideOnNextFilmDetected = false
+                calibrationBannerAwaitingPreviewClear = false
             }
 
-            calibrationBannerHideOnNextMeasurement && calibrationBannerVisible -> {
-                clearCalibrationBannerInternal()
+            !calibrationBannerVisible -> {
+                refreshCalibrationBannerForCurrentStateInternal()
             }
         }
     }
@@ -446,9 +508,8 @@ class MeasurementPipeline(
         calibrationBannerVisible = true
 
         binding.txtCalibrationBanner.text = buildString {
-            append(if (failed) "Calibration 실패" else "Calibration 중")
-            append('\n')
-            append("(${completedCount}/${totalCount} 완료)")
+            append(if (failed) "보정 실패 " else "보정중 ")
+            append("(${completedCount}/${totalCount})")
         }
         binding.txtCalibrationBanner.visibility = View.VISIBLE
 
@@ -747,7 +808,6 @@ class MeasurementPipeline(
                         // ✅ 결과 오버레이는 손 감지 시 자동으로 닫히게(최종 흐름일 때만)
                         showCapturedOverlay(previewBmp, dismissOnHand = shouldFinalize)
                         handleCalibrationBannerAfterMeasurement(res.calibrationToastMessage)
-                        res.calibrationToastMessage?.let { showToast(it) }
 
                         appendStatus(
                             "치수 분석 완료(Grid): films=${res.detectedFilms}, " +
@@ -1009,7 +1069,6 @@ class MeasurementPipeline(
                         // ✅ 결과 오버레이는 손 감지 시 자동으로 닫히게(최종 흐름일 때만)
                         showCapturedOverlay(previewBmp, dismissOnHand = shouldFinalize)
                         handleCalibrationBannerAfterMeasurement(res.calibrationToastMessage)
-                        res.calibrationToastMessage?.let { showToast(it) }
 
                         appendStatus(
                             "치수 분석 완료: films=${res.detectedFilms}, " +
