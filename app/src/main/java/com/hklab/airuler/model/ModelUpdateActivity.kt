@@ -70,8 +70,8 @@ class ModelUpdateActivity : AppCompatActivity() {
                 toggleSelection(model)
             },
             onTap = { model ->
-                // 선택 모드일 때만 탭으로 토글
-                if (selectedModels.isNotEmpty()) toggleSelection(model)
+                // ✅ 요청사항: 길게 누르지 않고, 짧게 탭해서 바로 선택/해제
+                toggleSelection(model)
             }
         )
 

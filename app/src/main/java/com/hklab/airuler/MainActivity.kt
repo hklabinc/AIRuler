@@ -141,6 +141,10 @@ class MainActivity : AppCompatActivity() {
         AppSessionSettings.gridCalibrationEnabled = afterCalib
         AppSessionSettings.offsetCalibrationUserOverridden = true
 
+        if (beforeCalib != afterCalib && ::measurementPipeline.isInitialized) {
+            measurementPipeline.clearCalibrationBanner()
+        }
+
         // ON -> OFF 로 전환되는 경우: 현재까지의 offset을 모델 JSON에 저장
         if (beforeCalib && !afterCalib) {
             selectedModelName?.let { model ->
@@ -264,6 +268,7 @@ class MainActivity : AppCompatActivity() {
         // 초기 모델 기반 Ref 로딩
         
         initUi()
+        measurementPipeline.clearCalibrationBanner()
 
         // ✅ (성능) 첫 측정에서 dt가 튀는 현상(모델 init/warm-up)을 줄이기 위해
         //    백그라운드에서 1회 warm-up을 수행합니다.
@@ -321,6 +326,7 @@ class MainActivity : AppCompatActivity() {
         // 1) 모델 변경 처리
         val newModel = intent.getStringExtra(ModelStore.EXTRA_SELECTED_MODEL)
         if (!newModel.isNullOrBlank() && newModel != selectedModelName) {
+            measurementPipeline.clearCalibrationBanner()
             selectedModelName = newModel
             ModelStore.save(this, newModel)
             updatePreviewPauseUi()
@@ -536,6 +542,7 @@ class MainActivity : AppCompatActivity() {
                     .setMessage("Offsets 값과 측정 n(누적 샘플 수)을 0으로 초기화합니다.\n\n계속할까요?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ok = GridOnlineOffsetCalibrationStore.resetOffsetsForModel(this, base)
+                        measurementPipeline.clearCalibrationBanner()
                         showToast(if (ok) "Offsets reset" else "Offsets reset (session only)")
                         // 리셋된 값을 바로 확인할 수 있도록 다시 표시
                         showGridCalibrationOffsetsDialog()

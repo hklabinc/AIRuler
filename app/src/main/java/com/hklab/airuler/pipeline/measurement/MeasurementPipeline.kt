@@ -1,5 +1,7 @@
 package com.hklab.airuler.pipeline.measurement
 
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
@@ -10,6 +12,7 @@ import android.provider.Settings
 import android.util.Log
 import android.util.Size
 import android.view.View
+import android.view.animation.LinearInterpolator
 import androidx.appcompat.app.AppCompatActivity
 import androidx.exifinterface.media.ExifInterface
 import com.hklab.airuler.R
@@ -134,6 +137,14 @@ class MeasurementPipeline(
     //    교체/닫기 시점에 안전하게 recycle 하여 GC/메모리 스파이크를 줄입니다.
     private var lastCapturedOverlayBitmap: Bitmap? = null
 
+    // ✅ Calibration warm-up 진행 배너
+    private var calibrationBannerCompletedCount: Int = 0
+    private var calibrationBannerVisible: Boolean = false
+    private var calibrationBannerHideOnNextMeasurement: Boolean = false
+    private var calibrationBannerBlinkAnimator: ObjectAnimator? = null
+    private val calibrationProgressRegex =
+        Regex("""Calibration\s*(\d+)\s*/\s*(\d+)\s*완료""", RegexOption.IGNORE_CASE)
+
     private data class MediaReadySnapshot(
         val sizeBytes: Long,
         val isPending: Int?
@@ -217,6 +228,7 @@ class MeasurementPipeline(
         activity.runOnUiThread {
             // 더 최신 캡처가 시작되었으면 무시
             if (state.currentSamsungCaptureToken != token) return@runOnUiThread
+            handleCalibrationBannerAfterMeasurement(null)
             showToast("사진 저장이 아직 완료되지 않았습니다. 잠시 후 Retry 해주세요.")
             appendStatus("사진 저장 지연/대기 시간 초과(> ${maxWaitMs}ms). Retry 권장")
             state.finishMeasuring(clearPending = false)
@@ -292,6 +304,7 @@ class MeasurementPipeline(
             // GlobalParams는 Settings 값으로 복구(오버라이드가 남아 live preview에 영향 주는 것 방지)
             GlobalParams.applyCaptureMegapixel(AppSessionSettings.captureMegapixel)
 
+            handleCalibrationBannerAfterMeasurement(null)
             showToast("치수 분석이 오래 걸립니다(시간 초과). Retry 해주세요.")
             appendStatus("치수 분석 시간 초과(> ${watchdogMs}ms). Retry 권장")
 
@@ -360,6 +373,113 @@ class MeasurementPipeline(
         lastCapturedOverlayBitmap = null
 
         updatePreviewPauseUi()
+    }
+
+    fun clearCalibrationBanner() {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            clearCalibrationBannerInternal()
+        } else {
+            activity.runOnUiThread { clearCalibrationBannerInternal() }
+        }
+    }
+
+    private fun clearCalibrationBannerInternal() {
+        stopCalibrationBannerBlink()
+        calibrationBannerCompletedCount = 0
+        calibrationBannerVisible = false
+        calibrationBannerHideOnNextMeasurement = false
+        binding.txtCalibrationBanner.text = ""
+        binding.txtCalibrationBanner.visibility = View.GONE
+        binding.txtCalibrationBanner.alpha = 1f
+    }
+
+    private fun handleCalibrationBannerAfterMeasurement(calibrationToastMessage: String?) {
+        if (!AppSessionSettings.gridCalibrationEnabled) {
+            clearCalibrationBannerInternal()
+            return
+        }
+
+        val totalCount = GridOnlineOffsetCalibrationStore.WARMUP_SAMPLES
+        val progressMatch = calibrationToastMessage
+            ?.let { calibrationProgressRegex.find(it) }
+
+        when {
+            progressMatch != null -> {
+                val completedCount = progressMatch.groupValues[1]
+                    .toIntOrNull()
+                    ?.coerceIn(0, totalCount)
+                    ?: 0
+                showCalibrationBanner(completedCount = completedCount, totalCount = totalCount, failed = false)
+                calibrationBannerHideOnNextMeasurement = completedCount >= totalCount
+            }
+
+            !calibrationToastMessage.isNullOrBlank() &&
+                calibrationToastMessage.contains("실패", ignoreCase = true) -> {
+                val completedCount = currentCalibrationCompletedCount().coerceIn(0, totalCount)
+                showCalibrationBanner(completedCount = completedCount, totalCount = totalCount, failed = true)
+                calibrationBannerHideOnNextMeasurement = completedCount >= totalCount
+            }
+
+            calibrationBannerHideOnNextMeasurement && calibrationBannerVisible -> {
+                clearCalibrationBannerInternal()
+            }
+        }
+    }
+
+    private fun currentCalibrationCompletedCount(): Int {
+        val base = getSelectedModel()
+            ?.trim()
+            ?.substringBefore("_FO")
+            ?.takeIf { it.isNotBlank() }
+            ?: return calibrationBannerCompletedCount
+
+        return GridOnlineOffsetCalibrationStore.getMaxSampleN(base)
+            .coerceAtMost(GridOnlineOffsetCalibrationStore.WARMUP_SAMPLES)
+    }
+
+    private fun showCalibrationBanner(
+        completedCount: Int,
+        totalCount: Int,
+        failed: Boolean,
+    ) {
+        calibrationBannerCompletedCount = completedCount
+        calibrationBannerVisible = true
+
+        binding.txtCalibrationBanner.text = buildString {
+            append(if (failed) "Calibration 실패" else "Calibration 중")
+            append('\n')
+            append("(${completedCount}/${totalCount} 완료)")
+        }
+        binding.txtCalibrationBanner.visibility = View.VISIBLE
+
+        if (failed) {
+            stopCalibrationBannerBlink()
+        } else {
+            startCalibrationBannerBlink()
+        }
+    }
+
+    private fun startCalibrationBannerBlink() {
+        stopCalibrationBannerBlink()
+
+        calibrationBannerBlinkAnimator = ObjectAnimator.ofFloat(
+            binding.txtCalibrationBanner,
+            View.ALPHA,
+            1f,
+            0.25f,
+        ).apply {
+            duration = 650L
+            repeatCount = ValueAnimator.INFINITE
+            repeatMode = ValueAnimator.REVERSE
+            interpolator = LinearInterpolator()
+            start()
+        }
+    }
+
+    private fun stopCalibrationBannerBlink() {
+        calibrationBannerBlinkAnimator?.cancel()
+        calibrationBannerBlinkAnimator = null
+        binding.txtCalibrationBanner.alpha = 1f
     }
 
     /** 삼성 카메라 복귀 Uri 처리(프리뷰 표시 + 측정 + 저장) */
@@ -626,6 +746,7 @@ class MeasurementPipeline(
 
                         // ✅ 결과 오버레이는 손 감지 시 자동으로 닫히게(최종 흐름일 때만)
                         showCapturedOverlay(previewBmp, dismissOnHand = shouldFinalize)
+                        handleCalibrationBannerAfterMeasurement(res.calibrationToastMessage)
                         res.calibrationToastMessage?.let { showToast(it) }
 
                         appendStatus(
@@ -792,6 +913,7 @@ class MeasurementPipeline(
                             state.finishMeasuring(clearPending = false)
                         }
 
+                        handleCalibrationBannerAfterMeasurement(null)
                         showToast(failMsg)
                         appendStatus(failMsg)
                         appendStatus(hint)
@@ -886,6 +1008,7 @@ class MeasurementPipeline(
 
                         // ✅ 결과 오버레이는 손 감지 시 자동으로 닫히게(최종 흐름일 때만)
                         showCapturedOverlay(previewBmp, dismissOnHand = shouldFinalize)
+                        handleCalibrationBannerAfterMeasurement(res.calibrationToastMessage)
                         res.calibrationToastMessage?.let { showToast(it) }
 
                         appendStatus(
@@ -1051,6 +1174,7 @@ class MeasurementPipeline(
                             state.finishMeasuring(clearPending = false)
                         }
 
+                        handleCalibrationBannerAfterMeasurement(null)
                         showToast(failMsg)
                         appendStatus(failMsg)
                         appendStatus(hint)

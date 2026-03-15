@@ -1,6 +1,7 @@
 package com.hklab.airuler.model
 
 import android.app.DownloadManager
+import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -14,6 +15,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.util.DisplayMetrics
 import android.util.Log
 import android.util.Size
@@ -58,6 +60,16 @@ class ModelSelectActivity : AppCompatActivity() {
         applySettingsFromResult(data)
     }
 
+    private val unknownAppSourcesLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && packageManager.canRequestPackageInstalls()) {
+            launchPendingDownloadedApkInstaller()
+        } else if (pendingSwInstallUri != null) {
+            toast("앱 설치 권한이 허용되지 않아 업데이트 설치를 진행할 수 없습니다")
+        }
+    }
+
     // ===== SW Update (APK) download =====
     private companion object {
         private const val TAG = "ModelSelectActivity"
@@ -76,6 +88,7 @@ class ModelSelectActivity : AppCompatActivity() {
 
     private var swUpdateDownloadId: Long = -1L
     private val swUpdateHandler = Handler(Looper.getMainLooper())
+    private var pendingSwInstallUri: Uri? = null
 
     // (Dialog UI refs) - 다이얼로그가 닫히면 null 로 정리
     private var swDialog: AlertDialog? = null
@@ -646,6 +659,71 @@ class ModelSelectActivity : AppCompatActivity() {
         }
     }
 
+    private fun promptInstallDownloadedApk(downloadId: Long): Boolean {
+        val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+        val apkUri = runCatching { dm.getUriForDownloadedFile(downloadId) }.getOrNull()
+        if (apkUri == null) {
+            updateSwDialogProgress(null, "다운로드는 완료되었지만 APK 파일을 열 수 없습니다")
+            return false
+        }
+
+        pendingSwInstallUri = apkUri
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+            val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                data = Uri.parse("package:$packageName")
+            }
+
+            return runCatching {
+                unknownAppSourcesLauncher.launch(intent)
+                true
+            }.getOrElse { e ->
+                Log.w(TAG, "Unknown-app-sources settings launch failed", e)
+                toast("앱 설치 권한 화면을 열 수 없습니다: ${e.message ?: e.javaClass.simpleName}")
+                false
+            }
+        }
+
+        return launchPendingDownloadedApkInstaller()
+    }
+
+    private fun launchPendingDownloadedApkInstaller(): Boolean {
+        val apkUri = pendingSwInstallUri ?: return false
+
+        val installIntent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
+            data = apkUri
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(apkUri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        return try {
+            when {
+                installIntent.resolveActivity(packageManager) != null -> startActivity(installIntent)
+                viewIntent.resolveActivity(packageManager) != null -> startActivity(viewIntent)
+                else -> {
+                    toast("APK 설치 화면을 열 수 없습니다")
+                    return false
+                }
+            }
+            pendingSwInstallUri = null
+            true
+        } catch (e: ActivityNotFoundException) {
+            Log.w(TAG, "APK installer not found", e)
+            toast("APK 설치 앱을 찾을 수 없습니다")
+            false
+        } catch (e: SecurityException) {
+            Log.w(TAG, "APK installer launch blocked", e)
+            toast("APK 설치 화면을 열 수 없습니다: ${e.message ?: e.javaClass.simpleName}")
+            false
+        }
+    }
+
     private fun handleSwUpdateCompleted(id: Long) {
         val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
         val q = DownloadManager.Query().setFilterById(id)
@@ -661,10 +739,15 @@ class ModelSelectActivity : AppCompatActivity() {
                     .putLong(KEY_SW_LAST_DOWNLOADED_AT, System.currentTimeMillis())
                     .apply()
 
-                updateSwDialogProgress(100, "Downloaded: Download/$SW_UPDATE_FILE_NAME")
+                updateSwDialogProgress(100, "다운로드 완료. 설치 화면을 엽니다…")
 
-                // ✅ 완료 후 UI를 기본 상태로 복귀(다운로드 화면이 계속 남아있지 않도록)
-                swUpdateHandler.postDelayed({ resetSwDialogToIdle() }, 700L)
+                val installUiLaunched = promptInstallDownloadedApk(id)
+                if (installUiLaunched) {
+                    swDialog?.dismiss()
+                } else {
+                    // ✅ 설치 화면을 띄우지 못한 경우에만 다이얼로그를 기본 상태로 복귀
+                    swUpdateHandler.postDelayed({ resetSwDialogToIdle() }, 700L)
+                }
 
             } else {
                 val reason = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
