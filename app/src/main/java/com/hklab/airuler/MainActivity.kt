@@ -48,6 +48,7 @@ import java.io.File
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import com.hklab.airuler.model.ModelNameCompat
 
 /**
  * MainActivity는 “UI + 파이프라인 오케스트레이션”만 담당하도록 역할을 줄였습니다.
@@ -148,7 +149,7 @@ class MainActivity : AppCompatActivity() {
         // ON -> OFF 로 전환되는 경우: 현재까지의 offset을 모델 JSON에 저장
         if (beforeCalib && !afterCalib) {
             selectedModelName?.let { model ->
-                val base = model.trim().substringBefore("_FO")
+                val base = ModelNameCompat.canonical(model)
                 GridOnlineOffsetCalibrationStore.persistOffsetsToModelJson(this, base)
             }
         }
@@ -325,8 +326,8 @@ class MainActivity : AppCompatActivity() {
         if (intent == null) return
 
         // 1) 모델 변경 처리
-        val newModel = intent.getStringExtra(ModelStore.EXTRA_SELECTED_MODEL)
-        if (!newModel.isNullOrBlank() && newModel != selectedModelName) {
+        val newModel = ModelNameCompat.canonical(intent.getStringExtra(ModelStore.EXTRA_SELECTED_MODEL))
+        if (newModel.isNotBlank() && newModel != selectedModelName) {
             selectedModelName = newModel
             ModelStore.save(this, newModel)
             measurementPipeline.refreshCalibrationBannerForCurrentState()
@@ -371,7 +372,7 @@ class MainActivity : AppCompatActivity() {
         //    다시 돌아왔을 때 이어서 사용할 수 있게 합니다.
         if (AppSessionSettings.gridCalibrationEnabled) {
             selectedModelName?.let { model ->
-                val base = model.trim().substringBefore("_FO")
+                val base = ModelNameCompat.canonical(model)
                 runCatching { GridOnlineOffsetCalibrationStore.persistOffsetsToModelJson(this, base) }
             }
         }
@@ -492,7 +493,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val base = model.trim().substringBefore("_FO")
+        val base = ModelNameCompat.canonical(model)
 
         // ✅ 요구사항: "현재 모델명.json 파일"에 저장된 measure별 offset 값만 표시
         val cfg = FilmModelConfigLoader.loadFromInternalModels(this, base)
@@ -694,7 +695,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val base = model.trim().substringBefore("_FO")
+        val base = ModelNameCompat.canonical(model)
 
         AlertDialog.Builder(this)
             .setTitle("Update Model")
@@ -911,8 +912,8 @@ class MainActivity : AppCompatActivity() {
     // ---------------- Model selection ----------------
 
     private fun ensureModelSelectedOrGoHome(): Boolean {
-        val fromIntent = intent.getStringExtra(ModelStore.EXTRA_SELECTED_MODEL)
-        if (!fromIntent.isNullOrBlank()) {
+        val fromIntent = ModelNameCompat.canonical(intent.getStringExtra(ModelStore.EXTRA_SELECTED_MODEL))
+        if (fromIntent.isNotBlank()) {
             ModelStore.save(this, fromIntent)
             selectedModelName = fromIntent
             return true
@@ -920,7 +921,7 @@ class MainActivity : AppCompatActivity() {
 
         val stored = ModelStore.get(this)
         if (!stored.isNullOrBlank()) {
-            selectedModelName = stored
+            selectedModelName = ModelNameCompat.canonical(stored)
             return true
         }
 
@@ -1056,8 +1057,7 @@ class MainActivity : AppCompatActivity() {
 
         // ✅ 모델 안내 오버레이 이미지
         // - 서버(images_overlay)에서 다운로드하지 않고, 앱 내장 assets/overlay/<model>.jpg 를 사용
-        // - 모델명에 "_FO"가 붙어있어도 baseModel 로 정규화
-        val baseModel = model.trim().substringBefore("_FO")
+        val baseModel = ModelNameCompat.canonical(model)
 
         val assetUri = ModelFileStore.overlayAssetUriOrNull(this, baseModel)
         if (!assetUri.isNullOrBlank()) {

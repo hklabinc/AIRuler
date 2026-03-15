@@ -16,6 +16,18 @@ import java.net.URL
 
 object HawkModelDownloader {
 
+    private data class RunFolderMeta(
+        val folderName: String,
+        val projectName: String,
+        val size: String,
+        val timestampKey: String,
+    )
+
+    private val RUN_FOLDER_RE = Regex(
+        "^(.+)_([^_]+)_(\\d{8})_(\\d{6})$",
+        RegexOption.IGNORE_CASE
+    )
+
     // ---------------------------------------------------------------------
     // ✅ YesunAI 연동 (서버 주소는 GlobalParams 에서만 관리)
     //  - runs:   /ruler/runs
@@ -46,14 +58,15 @@ object HawkModelDownloader {
         modelName: String,
         onProgress: (percent: Int) -> Unit
     ): File = withContext(Dispatchers.IO) {
-        // ✅ 혹시 modelName에 "_FO"가 붙어 들어와도 base 모델명만 사용
-        val baseModel = modelName.trim().substringBefore("_FO")
-        val projectName = baseModel
+        val baseModel = ModelNameCompat.canonical(modelName)
+        require(baseModel.isNotBlank()) { "모델명이 비어 있습니다" }
+
         val isGrid = baseModel.equals("Grid", ignoreCase = true)
 
         // ✅ nano 고정 + 형식 일치하는 폴더만 필터링해서 최신 선택
-        val latestFolder = findLatestRunFolderStrict(projectName = projectName, size = "nano")
-            ?: throw IllegalStateException("서버에 run 폴더가 없습니다: ${projectName}_nano_YYYYMMDD_HHMMSS")
+        //    - 서버에 남아 있는 *_FO run 폴더는 여기서 명시적으로 제외합니다.
+        val latestFolder = findLatestRunFolderStrict(projectName = baseModel, size = "nano")
+            ?: throw IllegalStateException("서버에 run 폴더가 없습니다: ${baseModel}_nano_YYYYMMDD_HHMMSS")
 
         // ✅ 요구사항 변경:
         // - (구) /weights/best_saved_model/best_float16.tflite
@@ -124,6 +137,9 @@ object HawkModelDownloader {
      * 예: L1827-00_nano_20251217_044032
      */
     private fun findLatestRunFolderStrict(projectName: String, size: String): String? {
+        val requestedProject = ModelNameCompat.canonical(projectName)
+        val requestedSize = size.trim()
+
         val conn = (URL(listRunsApi()).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 10_000
@@ -142,17 +158,30 @@ object HawkModelDownloader {
 
         val arr: JSONArray = parseFoldersArray(body) ?: return null
 
-        val prefix = "${projectName}_${size}_"
-        val pattern = Regex("^${Regex.escape(prefix)}\\d{8}_\\d{6}$")
-
-        var best: String? = null
+        var best: RunFolderMeta? = null
         for (i in 0 until arr.length()) {
-            val f = arr.optString(i)
-            if (!pattern.matches(f)) continue
-            // ✅ 고정폭 숫자라 문자열 비교로 최신 선택 가능
-            if (best == null || f > best!!) best = f
+            val folderName = arr.optString(i).trim()
+            val meta = parseRunFolderMeta(folderName) ?: continue
+
+            if (ModelNameCompat.isLegacyFoVariant(meta.projectName)) continue
+            if (!meta.projectName.equals(requestedProject, ignoreCase = true)) continue
+            if (!meta.size.equals(requestedSize, ignoreCase = true)) continue
+
+            if (best == null || meta.timestampKey > best!!.timestampKey) {
+                best = meta
+            }
         }
-        return best
+        return best?.folderName
+    }
+
+    private fun parseRunFolderMeta(folderName: String): RunFolderMeta? {
+        val match = RUN_FOLDER_RE.matchEntire(folderName) ?: return null
+        return RunFolderMeta(
+            folderName = folderName,
+            projectName = match.groupValues[1],
+            size = match.groupValues[2],
+            timestampKey = match.groupValues[3] + match.groupValues[4],
+        )
     }
 
     /** 서버 응답이 JSONArray 또는 JSONObject(folders=JSONArray) 인 경우를 모두 처리. */

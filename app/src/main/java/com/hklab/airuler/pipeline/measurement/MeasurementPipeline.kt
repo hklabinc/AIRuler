@@ -49,6 +49,7 @@ import com.hklab.airuler.GlobalParams
 import com.hklab.airuler.log.AirulerFileLogger
 import java.math.BigDecimal
 import java.math.RoundingMode
+import com.hklab.airuler.model.ModelNameCompat
 
 /**
  * MeasurementPipeline
@@ -488,7 +489,7 @@ class MeasurementPipeline(
     private fun currentCalibrationCompletedCount(): Int {
         val base = getSelectedModel()
             ?.trim()
-            ?.substringBefore("_FO")
+            ?.let(ModelNameCompat::canonical)
             ?.takeIf { it.isNotBlank() }
             ?: return calibrationBannerCompletedCount
 
@@ -1690,7 +1691,7 @@ class MeasurementPipeline(
 
         // ✅ EXIF(UserComment) 결과 JSON에는 'adjust' 대신, 실제 적용된 'offset' 값을 기록합니다.
         // - offset은 measure별 + film별로 달라질 수 있으므로 (measureIndex, filmIndex)로 조회합니다.
-        val modelBase = modelName.trim().substringBefore("_FO")
+        val modelBase = ModelNameCompat.canonical(modelName)
         val offsetSnapshot = GridOnlineOffsetCalibrationStore.snapshotOffsets(modelBase)
         val offsetMapFallback = loadMeasureOffsetMap(modelName)
 
@@ -1908,7 +1909,7 @@ class MeasurementPipeline(
      * - value: offset 문자열 (없으면 "")
      */
     private fun loadMeasureOffsetMap(modelName: String): Map<String, String> {
-        val base = modelName.trim().substringBefore("_FO")
+        val base = ModelNameCompat.canonical(modelName)
         val jsonFile = ModelFileStore.downloadedModelJsonFile(activity, base)
         if (!jsonFile.exists()) return emptyMap()
 
@@ -1941,7 +1942,7 @@ class MeasurementPipeline(
      *   (예: ["CP1", "CP2", "No.3-1", ...])
      */
     private fun loadMeasureIndexOrder(modelName: String): List<String> {
-        val base = modelName.trim().substringBefore("_FO")
+        val base = ModelNameCompat.canonical(modelName)
         val jsonFile = ModelFileStore.downloadedModelJsonFile(activity, base)
         if (!jsonFile.exists()) return emptyList()
 

@@ -9,14 +9,21 @@ object ModelStore {
     const val EXTRA_SELECTED_MODEL = "extra_selected_model"
 
     fun save(context: Context, modelName: String) {
+        val canonical = ModelNameCompat.canonical(modelName)
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
             .edit()
-            .putString(KEY_SELECTED, modelName)
+            .putString(KEY_SELECTED, canonical.ifBlank { null })
             .apply()
     }
 
     fun get(context: Context): String? {
-        return context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
-            .getString(KEY_SELECTED, null)
+        val sp = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+        val stored = sp.getString(KEY_SELECTED, null)
+        val canonical = ModelNameCompat.canonical(stored)
+        if (canonical.isBlank()) return null
+        if (canonical != stored) {
+            sp.edit().putString(KEY_SELECTED, canonical).apply()
+        }
+        return canonical
     }
 }

@@ -362,7 +362,7 @@ class ModelSelectActivity : AppCompatActivity() {
         if (beforeCalib && !afterCalib) {
             runCatching {
                 val stored = ModelStore.get(this)
-                val base = stored?.trim()?.substringBefore("_FO")
+                val base = stored?.let(ModelNameCompat::canonical)
                 if (!base.isNullOrBlank()) {
                     GridOnlineOffsetCalibrationStore.persistOffsetsToModelJson(this, base)
                 }
@@ -445,7 +445,7 @@ class ModelSelectActivity : AppCompatActivity() {
     // ---------------- Open Main (with file guards) ----------------
 
     private fun tryOpenMain(model: String) {
-        val base = model.trim().substringBefore("_FO")
+        val base = ModelNameCompat.canonical(model)
         if (!isModelReadyToEnter(base)) return
         openMain(base)
     }
@@ -492,7 +492,7 @@ class ModelSelectActivity : AppCompatActivity() {
 
         // ✅ 요구사항: 모델 선택 후 "처음부터 offset 업데이트"를 위해 offsets/n을 초기화
         runCatching {
-            val base = model.trim().substringBefore("_FO")
+            val base = ModelNameCompat.canonical(model)
             GridOnlineOffsetCalibrationStore.resetOffsetsForModel(this, base)
         }
 

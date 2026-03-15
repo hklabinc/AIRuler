@@ -1,6 +1,7 @@
 package com.hklab.airuler.inspection
 
 import java.util.Locale
+import com.hklab.airuler.model.ModelNameCompat
 
 /**
  * HkDetector(main_detector.py) 기준의 "good/bad" 합불 판정 파라미터 포팅.
@@ -9,7 +10,7 @@ import java.util.Locale
  *   Android(AIRuler)에서도 동일하게 사용하기 위한 규칙 모음.
  *
  * ⚠️ 중요
- * - 모델 키는 "모델명"(예: "L2024-03")에서 `_FO` 접미사 등을 제거한 base 키로 정규화합니다.
+ * - 모델 키는 공백 제거 + legacy `_FO` suffix 정리 후 base 키로 사용합니다.
  * - 아래 맵에 없는 모델은 expectedGoodTotal()이 null을 반환합니다.
  *   (=> PASS 조건(all_good)을 만들 수 없으므로, bad가 나오면 FAIL만 가능)
  */
@@ -65,8 +66,7 @@ object GoodBadModelRules {
     private fun normalizeModelKey(modelName: String?): String {
         val raw = (modelName ?: "").trim()
         if (raw.isEmpty()) return ""
-        // InferencePipeline / FilmModelConfigLoader와 동일 규칙: _FO suffix 제거
-        return raw.substringBefore("_FO")
+        return ModelNameCompat.canonical(raw)
             .substringBefore('.')
             .uppercase(Locale.US)
     }

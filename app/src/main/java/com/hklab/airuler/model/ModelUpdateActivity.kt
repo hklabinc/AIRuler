@@ -108,7 +108,7 @@ class ModelUpdateActivity : AppCompatActivity() {
     private fun buildRows(): List<ModelRow> {
         val names = collectAllModelNames()
         return names.map { model ->
-            val base = model.trim().substringBefore("_FO")
+            val base = ModelNameCompat.canonical(model)
 
             val tflite = ModelFileStore.downloadedModelFile(this, base)
             val tfliteExists = tflite.exists()
@@ -148,7 +148,7 @@ class ModelUpdateActivity : AppCompatActivity() {
         val dir = ModelFileStore.modelsDir(this)
         dir.listFiles { f -> f.isFile && f.extension.equals("tflite", true) }?.forEach { f ->
             val parsed = parseTfliteName(f.name)
-            val model = parsed?.model ?: f.nameWithoutExtension
+            val model = ModelNameCompat.canonical(parsed?.model ?: f.nameWithoutExtension)
             if (model.isNotBlank()) set.add(model)
         }
 
@@ -259,7 +259,7 @@ class ModelUpdateActivity : AppCompatActivity() {
             .setTitle("Add model")
             .setView(edit)
             .setPositiveButton("Add") { _, _ ->
-                val name = edit.text.toString().trim()
+                val name = ModelNameCompat.canonical(edit.text.toString())
                 if (name.isBlank()) {
                     toast("모델명이 비어있습니다")
                     return@setPositiveButton
@@ -338,7 +338,7 @@ class ModelUpdateActivity : AppCompatActivity() {
             var fail = 0
 
             for ((idx, m) in models.withIndex()) {
-                val base = m.trim().substringBefore("_FO")
+                val base = ModelNameCompat.canonical(m)
                 val label = "[${idx + 1}/${models.size}] $base"
 
                 binding.txtJobStatus.text = "$label : 0%"

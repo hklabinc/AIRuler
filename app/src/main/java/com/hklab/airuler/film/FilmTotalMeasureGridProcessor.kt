@@ -33,6 +33,7 @@ import kotlin.math.min
 import com.hklab.airuler.GlobalParams
 import com.hklab.airuler.calibration.GridOnlineOffsetCalibrationStore
 import com.hklab.airuler.pipeline.state.AppSessionSettings
+import com.hklab.airuler.model.ModelNameCompat
 
 /**
  * Grid 기반 "필름 전체 길이 측정" (Python: main_ruler_selected_2points_GUI_v15 의
@@ -92,7 +93,7 @@ object FilmTotalMeasureGridProcessor {
             // Grid warp도 미리 로드(없어도 실패로 치지 않음)
             runCatching { GridWarpCache.getOrLoad(appCtx) }
 
-            val baseModel = modelName.trim().substringBefore("_FO")
+            val baseModel = ModelNameCompat.canonical(modelName)
             val tfliteFile = ModelFileStore.downloadedModelFile(appCtx, baseModel)
             if (!tfliteFile.exists()) return
 
@@ -228,7 +229,7 @@ object FilmTotalMeasureGridProcessor {
         }
 
         // 2) 모델 파일/설정 로드
-        val baseModel = modelName.trim().substringBefore("_FO")
+        val baseModel = ModelNameCompat.canonical(modelName)
 
         // ✅ calibration ON/OFF는 한 번의 측정(run) 동안에는 고정된 스냅샷으로 사용
         //    (측정 중 토글이 바뀌어도 이 run은 일관된 동작을 유지)

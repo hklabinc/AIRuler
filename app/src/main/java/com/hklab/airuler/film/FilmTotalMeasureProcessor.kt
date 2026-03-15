@@ -34,6 +34,7 @@ import com.hklab.airuler.GlobalParams
 import com.hklab.airuler.calibration.GridOnlineOffsetCalibrationStore
 import com.hklab.airuler.pipeline.state.AppSessionSettings
 import com.hklab.airuler.log.AirulerFileLogger
+import com.hklab.airuler.model.ModelNameCompat
 
 /**
  * Python(HkRuler) `on_run_film_total_measure_ruler()` 파이프라인을 AIRuler에 이식한 프로세서.
@@ -389,7 +390,7 @@ object FilmTotalMeasureProcessor {
         val logs = ArrayList<String>()
 
         // (1) 모델 파일 로드
-        val base = modelName.trim().substringBefore("_FO")
+        val base = ModelNameCompat.canonical(modelName)
         val calibrationEnabled = AppSessionSettings.gridCalibrationEnabled
 
         // ✅ 2026-02-10 요청사항

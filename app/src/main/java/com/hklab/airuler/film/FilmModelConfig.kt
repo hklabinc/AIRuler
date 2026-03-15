@@ -4,6 +4,7 @@ import com.hklab.airuler.film.ExternalMediaStoreUtils
 import org.json.JSONObject
 import android.content.Context
 import com.hklab.airuler.model.ModelFileStore
+import com.hklab.airuler.model.ModelNameCompat
 
 data class RoiCfg(
     val key: String,
@@ -65,7 +66,7 @@ object FilmModelConfigLoader {
     }
 
     fun loadFromInternalModels(context: Context, modelName: String): FilmModelConfig? {
-        val base = modelName.trim().substringBefore("_FO")
+        val base = ModelNameCompat.canonical(modelName)
 
         // internal storage: files/downloaded_models/<model>.json  (현재 ModelFileStore 기준)
         val jsonFile = ModelFileStore.downloadedModelJsonFile(context, base)
