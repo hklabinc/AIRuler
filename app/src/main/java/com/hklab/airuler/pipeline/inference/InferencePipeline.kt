@@ -201,6 +201,14 @@ class InferencePipeline(
 
     @Volatile
     private var lastDetectionsForDirection: List<YoloDetection> = emptyList()
+    @Volatile
+    private var lastDirectionDetectionsAtMs: Long = 0L
+
+    // ✅ 화살표가 떠 있는 동안 실제 "필름을 빼는 동작"이 한 번이라도 관측되었는지 추적합니다.
+    // 빠르게 빼는 경우 YOLO가 empty frame 을 보기 전에 pause 될 수 있어 stale detection 이 남는데,
+    // 이 플래그가 true 인 경우에만 stale detection 을 안전하게 "필름 없음"으로 간주합니다.
+    @Volatile
+    private var decisionMoveObserved: Boolean = false
 
     // -------- Bitmap reuse (성능) --------
     private val frameReuseLock = Any()
@@ -542,6 +550,30 @@ class InferencePipeline(
         val hand = mh?.handExists == true
         val motion = mh?.motionExists == true
         return !hand && !motion
+    }
+
+    /**
+     * 화살표 표시 후 direction check 에서 쓰는 "최신 film detection"의 유효시간.
+     *
+     * - 사용자가 필름을 아주 빠르게 옆으로 빼면 YOLO가 필름이 사라진 프레임을 보기 전에 idle pause 될 수 있습니다.
+     * - 그 경우 lastDetectionsForDirection 이 stale 값으로 남아 화살표가 안 사라지는 문제가 생길 수 있어,
+     *   실제 이동이 이미 관측된 상태라면 일정 시간 이후 stale detection 을 비워 방향 추론을 마무리합니다.
+     * - yoloFrameInterval 을 고려해 너무 공격적으로 clear 되지 않도록 보수적으로 잡습니다.
+     */
+    private fun directionDetectionStaleMs(): Long {
+        val interval = yoloFrameInterval.coerceAtLeast(1).toLong()
+        return max(180L, interval * 70L)
+    }
+
+    private fun clearDecisionMoveTracking() {
+        decisionMoveObserved = false
+        lastDirectionDetectionsAtMs = 0L
+    }
+
+    private fun prepareDecisionMoveTrackingOnGuideShown() {
+        decisionMoveObserved = false
+        lastDirectionDetectionsAtMs =
+            if (lastDetectionsForDirection.isNotEmpty()) SystemClock.elapsedRealtime() else 0L
     }
 
     /**
@@ -911,9 +943,29 @@ class InferencePipeline(
                 if (mh.motionExists && mh.motionBoxPx != null) {
                     val cx = (mh.motionBoxPx.left + mh.motionBoxPx.right) / 2
                     val cy = (mh.motionBoxPx.top + mh.motionBoxPx.bottom) / 2
+                    decisionMoveObserved = true
                     filmTracker.update(cx to cy)
                 } else {
-                    if (!mh.handExists && lastDetectionsForDirection.isEmpty()) {
+                    val filmDetectionFresh =
+                        lastDetectionsForDirection.isNotEmpty() &&
+                                lastDirectionDetectionsAtMs > 0L &&
+                                (nowMs - lastDirectionDetectionsAtMs) < directionDetectionStaleMs()
+
+                    val shouldForceMissingByStaleDetection =
+                        decisionMoveObserved &&
+                                !mh.handExists &&
+                                lastDetectionsForDirection.isNotEmpty() &&
+                                !filmDetectionFresh
+
+                    if (shouldForceMissingByStaleDetection) {
+                        Log.i(
+                            tag,
+                            "Direction fallback: stale film detection cleared after move (age=${nowMs - lastDirectionDetectionsAtMs}ms)"
+                        )
+                        lastDetectionsForDirection = emptyList()
+                    }
+
+                    if (!mh.handExists && (lastDetectionsForDirection.isEmpty() || shouldForceMissingByStaleDetection)) {
                         filmTracker.update(null)
                     }
                 }
@@ -1181,6 +1233,7 @@ class InferencePipeline(
         binding.imgLeftArrow.visibility = View.GONE
         binding.imgRightArrow.visibility = View.GONE
 
+        clearDecisionMoveTracking()
         suppressTiltAngleDiffBadBoxDuringMove = false
         (binding.detectionOverlay as DetectionOverlayView).setDecisionMoveSuppression(false)
     }
@@ -1234,6 +1287,8 @@ class InferencePipeline(
             hideArrows()
             return
         }
+
+        prepareDecisionMoveTrackingOnGuideShown()
 
         binding.imgLeftArrow.visibility = View.GONE
         binding.imgRightArrow.visibility = View.GONE
@@ -1672,6 +1727,9 @@ class InferencePipeline(
 
                 // 방향 판단용(최신 YOLO 결과 유무)
                 lastDetectionsForDirection = results
+                if (results.isNotEmpty()) {
+                    lastDirectionDetectionsAtMs = SystemClock.elapsedRealtime()
+                }
 
                 val isGrid = isGridModelSelected()
 

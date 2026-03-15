@@ -1,5 +1,7 @@
 package com.hklab.airuler.inspection
 
+import java.util.ArrayDeque
+import kotlin.math.abs
 import kotlin.math.atan2
 
 class FilmTracker(
@@ -10,7 +12,13 @@ class FilmTracker(
     // ✅ 좌/우 판정 각도 여유(기존 ±45° → 기본 ±75°).
     //    - 각도가 커질수록 LEFT/RIGHT 영역이 넓어지고, DOWN 영역이 좁아집니다.
     //    - LEFT/RIGHT로 빼는 동작이 DOWN으로 오인식되는 케이스 완화 목적.
-    private var horizontalHalfAngleDeg: Double = 75.0
+    private var horizontalHalfAngleDeg: Double = 75.0,
+
+    // ✅ 빠르게 옆으로 빼는 경우를 위한 fallback 파라미터
+    // - weighted angle vote 로 결론이 안 날 때, 최근 trajectory 의 실제 이동량/마지막 위치로 보완 판정
+    private var displacementThresholdRatio: Float = 0.08f,
+    private var displacementDominanceRatio: Float = 1.15f,
+    private var relaxedEdgeThresholdScale: Float = 0.75f
 ) {
     private val trajectory = ArrayDeque<Pair<Int, Int>>() // (x,y)
     private var missingCount = 0
@@ -125,6 +133,45 @@ class FilmTracker(
             wRight >= wDown && wRight >= wLeft -> MoveDirection.RIGHT
             wLeft >= wDown && wLeft >= wRight -> MoveDirection.LEFT
             else -> MoveDirection.DOWN
+        }
+
+        // ✅ 빠른 removal fallback
+        // - motion box 가 1~2프레임만 잡히고 곧바로 사라지면, 중심 기준 vote 만으로는 UNKNOWN 이 될 수 있습니다.
+        // - 이 경우 최근 궤적의 실제 Δx/Δy 또는 마지막 위치를 이용해 보수적으로 한 번 더 판정합니다.
+        if (lastDirection == MoveDirection.UNKNOWN) {
+            val first = recent.firstOrNull()
+            val last = recent.lastOrNull()
+
+            if (first != null && last != null) {
+                val deltaX = (last.first - first.first).toDouble()
+                val deltaY = (last.second - first.second).toDouble()
+                val absDx = abs(deltaX)
+                val absDy = abs(deltaY)
+
+                val minDx = (frameW * displacementThresholdRatio).toDouble()
+                val minDy = (frameH * displacementThresholdRatio).toDouble()
+
+                lastDirection = when {
+                    absDx >= minDx && absDx >= absDy * displacementDominanceRatio && deltaX > 0.0 -> MoveDirection.RIGHT
+                    absDx >= minDx && absDx >= absDy * displacementDominanceRatio && deltaX < 0.0 -> MoveDirection.LEFT
+                    absDy >= minDy && absDy > absDx * displacementDominanceRatio && deltaY > 0.0 -> MoveDirection.DOWN
+                    else -> MoveDirection.UNKNOWN
+                }
+
+                if (lastDirection == MoveDirection.UNKNOWN) {
+                    val relaxedXThresh = xThresh * relaxedEdgeThresholdScale
+                    val relaxedYThresh = yThresh * relaxedEdgeThresholdScale
+                    val dxLast = last.first - centerX
+                    val dyLast = last.second - centerY
+
+                    lastDirection = when {
+                        dxLast >= relaxedXThresh -> MoveDirection.RIGHT
+                        dxLast <= -relaxedXThresh -> MoveDirection.LEFT
+                        dyLast >= relaxedYThresh -> MoveDirection.DOWN
+                        else -> MoveDirection.UNKNOWN
+                    }
+                }
+            }
         }
 
         directionDecided = true
