@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /d/AndroidStudioProjects/AIRuler -type f -name .github -o -name *.yml -o -name *.yaml)",
+      "Bash(find /d/AndroidStudioProjects/AIRuler/app/src/main/java -name \"*.kt\" -exec wc -l {} +)",
+      "Bash(ls:*)"
+    ]
+  }
+}
