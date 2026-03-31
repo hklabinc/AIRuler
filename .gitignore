@@ -1,3 +1,7 @@
+#Claude
+.claude/
+CLAUDE.md
+
 # Gradle
 .gradle/
 **/build/
