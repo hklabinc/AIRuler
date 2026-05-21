@@ -1,6 +1,7 @@
 #Claude
 .claude/
 CLAUDE.md
+doc/
 
 # Gradle
 .gradle/
