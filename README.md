@@ -8,13 +8,14 @@
 - 검사 주기 **3.6~3.7 s** (요구 4 s 이내, 50 MP 온디바이스)
 - **8.8시간** 연속 운전에서 기기 온도 최고 35.2 °C, 발열 제한 1단계 이하 유지
 
-▶ **시연 영상**: [media/AIRuler_test_video.mp4](media/AIRuler_test_video.mp4)
-
-![검사기 외관](docs/images/inspector.jpg)
+<table align="center"><tr>
+<td align="center"><img src="docs/images/inspector.jpg" alt="검사기 외관" width="380"><br><sub>검사기 외관</sub></td>
+<td align="center"><img src="media/AIRuler_test_video.gif" alt="시연 영상" width="220"><br><sub>시연 영상 (<a href="media/AIRuler_test_video.mp4">원본 mp4</a>)</sub></td>
+</tr></table>
 
 ## 시스템 구성
 
-![시스템 구성](docs/images/architecture.png)
+<p align="center"><img src="docs/images/architecture.png" alt="시스템 구성" width="720"></p>
 
 | 구분 | 구성 |
 |------|------|
@@ -26,7 +27,7 @@
 
 ## 동작 절차
 
-![앱 동작 절차](docs/images/operation_flow.png)
+<p align="center"><img src="docs/images/operation_flow.png" alt="앱 동작 절차" width="380"></p>
 
 1. **품목 선택** — 품목별 검출 모델(tflite)과 측정 프로파일(JSON)을 불러옵니다.
 2. **실시간 필름 검출·외관 검사** — CameraX 1280×720 프레임을 512×288로 줄여 YOLO11n(FP16, TFLite, CPU XNNPACK)으로
@@ -41,20 +42,21 @@
 5. **판정·저장** — 모든 항목이 허용 오차 이내이면 합격(오른쪽 화살표), 아니면 불합격(왼쪽 화살표).
    측정값은 결과 영상의 EXIF에 기록해 서버로 보냅니다.
 
-![대표 동작 화면](docs/images/app_screens.jpg)
+<p align="center"><img src="docs/images/app_screens.jpg" alt="대표 동작 화면" width="640"></p>
+<p align="center"><sub>(a) 외관 합격 (b) 외관 불합격 (c) 치수 합격 (d) 치수 불합격</sub></p>
 
-*(a) 외관 합격 (b) 외관 불합격 (c) 치수 합격 (d) 치수 불합격*
-
-![측정점 추출](docs/images/measurement_points.jpg)
+<p align="center"><img src="docs/images/measurement_points.jpg" alt="측정점 추출" width="520"></p>
+<p align="center"><sub>측정 결과(위)와 서브픽셀 측정점 추출 예(아래)</sub></p>
 
 ## 격자 기반 캘리브레이션
 
 스마트폰 광각 카메라로 약 450 mm 폭을 근거리에서 찍으면 렌즈 왜곡과 원근 때문에 **화면 위치마다 배율이 달라집니다.**
 5 mm 격자판으로 재 보면 50 MP에서 평균 18.11 px/mm(55.2 μm/px)지만 가로 방향으로 17.79~18.36 px/mm, **3.1%** 변합니다.
 
-| 가로 방향 | 세로 방향 |
-|:---:|:---:|
-| ![가로 배율](docs/images/grid_scale_horizontal.png) | ![세로 배율](docs/images/grid_scale_vertical.png) |
+<table align="center"><tr>
+<td align="center"><img src="docs/images/grid_scale_horizontal.png" alt="가로 배율" width="340"><br><sub>(a) 가로 방향</sub></td>
+<td align="center"><img src="docs/images/grid_scale_vertical.png" alt="세로 배율" width="340"><br><sub>(b) 세로 방향</sub></td>
+</tr></table>
 
 화면 전체에 배율 하나를 쓰면 격자점 오차가 RMS 0.24 mm, 최대 0.62 mm로 허용 오차(±0.15 mm)를 넘습니다.
 그래서 측정 평면에서 직접 얻은 격자점으로 화소 좌표를 mm 좌표에 **구간별 아핀 변환**(Delaunay 삼각분할 + 무게중심 보간)으로 대응시킵니다.
@@ -66,12 +68,12 @@
 4. 이웃 간격의 평균·표준편차로 이상점을 검증·보정합니다.
 5. 교차점의 화소·mm 좌표를 `Grid.json`으로 저장합니다. (스마트폰을 다시 장착하거나 초점 조건을 바꿀 때만 반복)
 
-![격자 분석 화면](docs/images/grid_analysis_screen.jpg)
+<p align="center"><img src="docs/images/grid_analysis_screen.jpg" alt="격자 분석 화면" width="480"></p>
 
 10 mm 간격 교차점만으로 변환을 만들고 나머지 교차점에서 검증하면, 오차가 50 MP에서 RMS 0.011 mm·최대 0.030 mm,
 200 MP에서 RMS 0.012 mm·최대 0.045 mm로 단일 배율이나 전역 호모그래피의 1/10 이하입니다.
 
-![변환 방식별 오차](docs/images/mapping_error.png)
+<p align="center"><img src="docs/images/mapping_error.png" alt="변환 방식별 오차" width="400"></p>
 
 **온라인 오프셋 보정** — 재장착·조명 변화로 생기는 항목별 상수 편향을 양품 측정값으로 보정합니다:
 `o ← o + α(g − (r + o))`. 처음 3장은 중앙값(α=1)으로 초기화하고 이후 지수 이동 평균(α=0.5)으로 갱신하며,
@@ -101,7 +103,7 @@
 | L1825-03 (3.1~145.37 mm) | 10 × 32 | 0.063 mm | 0.003~0.026 mm | 평균 0.024 mm |
 | M2379-02 (최대 319.11 mm) | 21 × 30 | 0.099 mm | 0.003~0.038 mm | 평균 0.033 mm |
 
-![정확도](docs/images/accuracy.png)
+<p align="center"><img src="docs/images/accuracy.png" alt="정확도" width="400"></p>
 
 **처리 시간** (현장 반복 측정의 최소~최대)
 
@@ -115,7 +117,7 @@
 **연속 운전** — 실제 운전 조건(실시간 검사 + 50 MP 촬영·측정 반복)으로 8.8시간 운전.
 4.5분 뒤 33.1 °C에서 발열 상태 1단계(경미한 제한)에 들어갔지만 이후 35.2 °C를 넘지 않았고 2단계 이상으로는 가지 않았습니다.
 
-![발열](docs/images/thermal.png)
+<p align="center"><img src="docs/images/thermal.png" alt="발열" width="400"></p>
 
 ## 주요 기능
 
